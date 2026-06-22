@@ -1,29 +1,76 @@
 services:
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certs:/etc/nginx/certs
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - shared-net
+    restart: always
+
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: letsencrypt
+    volumes:
+      - certs:/etc/nginx/certs
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      NGINX_PROXY_CONTAINER: nginx-proxy
+    networks:
+      - shared-net
+    depends_on:
+      - nginx-proxy
+    restart: always
+
   inference:
     build: ./python-inference
     container_name: sentitrack-inference
-    networks:
-      - shared-net
+    expose:
+      - "8000"
     volumes:
       - mlruns-data:/app/mlruns
-    restart: unless-stopped
+    networks:
+      - shared-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: always
 
   gateway:
     build: ./gateway
     container_name: sentitrack-gateway
     environment:
       INFERENCE_URL: http://sentitrack-inference:8000/predict
-      DB_HOST: shared-db
+      DB_HOST: sentitrack-db
       DB_PORT: 3306
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: sentitrack
       ALLOWED_ORIGIN: https://sentitrack.levelupseon.com
+      JWT_SECRET: ${JWT_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_ADDRESS: onboarding@levelupseon.com
+    expose:
+      - "4000"
     networks:
       - shared-net
     depends_on:
-      - inference
-    restart: unless-stopped
+      inference:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: always
 
   frontend:
     build: ./frontend
@@ -33,11 +80,33 @@ services:
       VIRTUAL_HOST: sentitrack.levelupseon.com
       LETSENCRYPT_HOST: sentitrack.levelupseon.com
       VIRTUAL_PORT: 3000
+    expose:
+      - "3000"
     networks:
       - shared-net
     depends_on:
       - gateway
-    restart: unless-stopped
+    restart: always
+
+  db:
+    image: mysql:8.0
+    container_name: sentitrack-db
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: sentitrack
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./gateway/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - shared-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: always
 
 networks:
   shared-net:
@@ -45,3 +114,7 @@ networks:
 
 volumes:
   mlruns-data:
+  db-data:
+  certs:
+  vhost:
+  html:
