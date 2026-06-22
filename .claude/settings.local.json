@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python --version; python -m pip --version 2>&1)",
+      "PowerShell(\\(Get-Command python\\).Source 2>&1)",
+      "PowerShell(py *)",
+      "PowerShell(docker exec sentitrack-db-local *)",
+      "PowerShell(docker exec *)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(curl.exe -X POST http://localhost:4000/api/auth/signup/request -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"xuan6.6j@gmail.com\\\\\",\\\\\"password\\\\\":\\\\\"testpassword123\\\\\"}\" 2>&1)"
+    ]
+  }
+}

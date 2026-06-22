@@ -1,0 +1,47 @@
+services:
+  inference:
+    build: ./python-inference
+    container_name: sentitrack-inference
+    networks:
+      - shared-net
+    volumes:
+      - mlruns-data:/app/mlruns
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    container_name: sentitrack-gateway
+    environment:
+      INFERENCE_URL: http://sentitrack-inference:8000/predict
+      DB_HOST: shared-db
+      DB_PORT: 3306
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: sentitrack
+      ALLOWED_ORIGIN: https://sentitrack.levelupseon.com
+    networks:
+      - shared-net
+    depends_on:
+      - inference
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: sentitrack-frontend
+    environment:
+      GATEWAY_URL: http://sentitrack-gateway:4000
+      VIRTUAL_HOST: sentitrack.levelupseon.com
+      LETSENCRYPT_HOST: sentitrack.levelupseon.com
+      VIRTUAL_PORT: 3000
+    networks:
+      - shared-net
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+networks:
+  shared-net:
+    external: true
+
+volumes:
+  mlruns-data:

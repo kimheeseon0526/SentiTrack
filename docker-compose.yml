@@ -1,0 +1,66 @@
+services:
+  inference:
+    build: ./python-inference
+    container_name: sentitrack-inference
+    expose:
+      - "8000"
+    volumes:
+      - mlruns-data:/app/mlruns
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  gateway:
+    build: ./gateway
+    container_name: sentitrack-gateway
+    env_file:
+      - ./gateway/.env
+    environment:
+      INFERENCE_URL: http://inference:8000/predict
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: localdev
+      DB_NAME: sentitrack
+      ALLOWED_ORIGIN: http://localhost:3000
+    expose:
+      - "4000"
+    depends_on:
+      inference:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: sentitrack-frontend
+    environment:
+      GATEWAY_URL: http://gateway:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+
+  db:
+    image: mysql:8.0
+    container_name: sentitrack-db-local
+    environment:
+      MYSQL_ROOT_PASSWORD: localdev
+      MYSQL_DATABASE: sentitrack
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./gateway/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-plocaldev"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mlruns-data:
+  db-data:

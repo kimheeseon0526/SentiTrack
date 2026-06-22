@@ -1,0 +1,572 @@
+:root {
+  --color-bg: #faf6f0;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f3ece3;
+  --color-border: #e8ddd0;
+  --color-text-primary: #3a2e26;
+  --color-text-secondary: #9c8b7d;
+  --color-accent: #b8847a;
+  --color-positive-bg: #eef3ea;
+  --color-positive-border: #a9c79a;
+  --color-positive-text: #5b7d4c;
+  --color-negative-bg: #faedea;
+  --color-negative-border: #d9a99e;
+  --color-negative-text: #a35c4f;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+textarea {
+  font-family: inherit;
+}
+
+/* ===== gnb ===== */
+
+.gnb {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: #f5f2ee;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+}
+
+.gnb-inner {
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gnb-logo {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+
+.gnb-nav {
+  display: flex;
+  gap: 32px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gnb-nav a {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.gnb-nav a:hover {
+  color: var(--color-text-primary);
+}
+
+/* ===== home page ===== */
+
+.hero {
+  background-color: var(--color-surface);
+  padding: 64px 24px 48px;
+}
+
+.hero-inner {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.hero-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0 0 14px;
+}
+
+.hero-title {
+  font-size: 42px;
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  color: var(--color-text-primary);
+  margin: 0 0 10px;
+  line-height: 1.05;
+}
+
+.hero-tagline {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.catalog {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 2px;
+}
+
+.catalog-empty {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+/* ===== product card ===== */
+
+.pc-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background-color: var(--color-surface);
+}
+
+.pc-swatch {
+  aspect-ratio: 1 / 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s ease;
+}
+
+.pc-link:hover .pc-swatch {
+  opacity: 0.88;
+}
+
+.pc-origin {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(42, 36, 33, 0.5);
+}
+
+.pc-body {
+  padding: 16px 16px 20px;
+}
+
+.pc-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 300;
+  color: #2a2421;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.pc-desc {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+
+.pc-price {
+  margin: 14px 0 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+/* ===== review filter tabs ===== */
+
+.review-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+
+.review-tab {
+  padding: 9px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-secondary);
+  border: none;
+}
+
+.review-tab:hover {
+  background-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.review-tab-active,
+.review-tab-active:hover {
+  background-color: var(--color-text-primary);
+  color: var(--color-surface);
+}
+
+.reviews-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.05em;
+  margin: 0 0 12px;
+}
+
+/* ===== archive page ===== */
+
+.archive-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+}
+
+.archive-bar-track {
+  height: 3px;
+  background-color: var(--color-surface-raised);
+  margin-top: 20px;
+  max-width: 360px;
+}
+
+.archive-bar-fill {
+  height: 3px;
+  background-color: var(--color-accent);
+}
+
+.archive-empty {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  padding: 32px 0;
+}
+
+/* ===== archive card ===== */
+
+.ac-wrap {
+  background-color: var(--color-surface);
+  padding: 18px 20px;
+  margin-bottom: 2px;
+}
+
+.ac-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 12px;
+}
+
+.ac-product {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.ac-product:hover {
+  color: var(--color-text-primary);
+}
+
+.ac-badge-positive {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-positive-text);
+  background-color: var(--color-positive-bg);
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ac-badge-negative {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-negative-text);
+  background-color: var(--color-negative-bg);
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ac-text {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--color-text-primary);
+  margin: 0 0 12px;
+  word-break: break-word;
+}
+
+.ac-footer {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  display: flex;
+  gap: 16px;
+}
+
+.ac-low-confidence {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* ===== fragrance note badges ===== */
+
+.fp-note-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fp-note-badge {
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  padding: 4px 10px;
+  letter-spacing: 0.03em;
+}
+
+/* ===== review card ===== */
+
+.rc-wrap {
+  padding: 16px 20px;
+  margin-bottom: 2px;
+}
+
+.rc-wrap-positive {
+  background-color: var(--color-positive-bg);
+}
+
+.rc-wrap-negative {
+  background-color: var(--color-negative-bg);
+}
+
+.rc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.rc-text {
+  margin: 0;
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+  color: var(--color-text-primary);
+}
+
+.rc-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff;
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.rc-badge-positive {
+  background-color: var(--color-positive-text);
+}
+
+.rc-badge-negative {
+  background-color: var(--color-negative-text);
+}
+
+.rc-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.rc-low-confidence {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* ===== indicator bar ===== */
+
+.ind-track {
+  height: 6px;
+  background-color: #eae3dc;
+  width: 100%;
+}
+
+.ind-fill {
+  height: 6px;
+  background-color: #2a2421;
+}
+
+/* ===== fragrance profile ===== */
+
+.fp-section {
+  background-color: var(--color-surface);
+  padding: 24px;
+  margin-bottom: 32px;
+}
+
+.fp-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin: 0 0 20px;
+}
+
+.fp-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.fp-note-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+
+.fp-note-label {
+  width: 52px;
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.fp-note-value {
+  color: var(--color-text-primary);
+}
+
+.fp-indicators {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fp-ind-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fp-ind-meta {
+  display: flex;
+  justify-content: space-between;
+}
+
+.fp-ind-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.fp-ind-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* ===== about page ===== */
+
+.about-hero {
+  background-color: var(--color-surface);
+  padding: 72px 24px 56px;
+}
+
+.about-inner {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.about-title {
+  font-size: 38px;
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.15;
+}
+
+.about-body {
+  padding: 56px 24px 80px;
+  background-color: var(--color-bg);
+}
+
+.about-lead {
+  font-size: 20px;
+  font-weight: 300;
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+  margin: 0 0 40px;
+}
+
+.about-divider {
+  height: 1px;
+  background-color: var(--color-surface-raised);
+  margin-bottom: 40px;
+}
+
+.about-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin: 0 0 12px;
+}
+
+.about-text {
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--color-text-primary);
+  margin: 0 0 32px;
+}
+
+.about-highlight {
+  font-style: italic;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
