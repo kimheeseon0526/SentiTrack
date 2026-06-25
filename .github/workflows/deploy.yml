@@ -46,13 +46,15 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            mkdir -p ~/sentitrack
-            cd ~/sentitrack
+            cd ~
 
-            if [ ! -f docker-compose.prod.yml ]; then
-              echo "docker-compose.prod.yml not found"
-              exit 1
+            if [ ! -d sentitrack/.git ]; then
+              rm -rf sentitrack
+              git clone https://github.com/kimheeseon0526/SentiTrack.git sentitrack
             fi
+
+            cd ~/sentitrack
+            git pull origin main
 
             docker network inspect shared-net >/dev/null 2>&1 || docker network create shared-net
 
