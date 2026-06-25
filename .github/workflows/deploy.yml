@@ -46,8 +46,8 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            mkdir -p ~/SentiTrack
-            cd ~/SentiTrack
+            mkdir -p ~/sentitrack
+            cd ~/sentitrack
 
             if [ ! -f docker-compose.prod.yml ]; then
               echo "docker-compose.prod.yml not found"
