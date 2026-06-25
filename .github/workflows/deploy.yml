@@ -57,26 +57,23 @@ jobs:
             cd ~/sentitrack
             git pull origin main
 
-            # GitHub Secrets를 기반으로 한 안전한 .env 파일 실시간 생성
-            cat > .env <<'EOF'
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
-            EOF
-
+            # 1. 안전하게 .env 파일 한 줄씩 생성 (특수문자 방어)
+            echo "DB_USER=${{ secrets.DB_USER }}" > .env
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
+            echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> .env
             chmod 600 .env
 
-            # 외부 Docker 네트워크 존재 확인 및 없으면 생성
+            # 2. 외부 도커 네트워크 생성 및 확인
             docker network inspect shared-net >/dev/null 2>&1 || docker network create shared-net
 
-            # 컨테이너 갱신 및 재시작
+            # 3. 도커 컴포즈 실행 (반드시 프로덕션 파일 지정 옵션 유지)
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
 
-            # 최종 실행 상태 출력하여 GitHub Actions 로그에서 확인 가능하도록 조치
-            echo "=== 최종 배포 컨테이너 상태 ==="
+            # 4. 배포 상태 모니터링 로그 출력
+            echo "=== 컨테이너 배포 상태 ==="
             docker compose -f docker-compose.prod.yml ps
             
-            # 불필요한 레이어 정리
+            # 5. 미사용 이미지 클리닝
             docker image prune -f
