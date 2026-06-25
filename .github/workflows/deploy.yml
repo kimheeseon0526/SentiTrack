@@ -1,22 +1,61 @@
-name: Deploy to EC2
+name: Deploy SentiTrack
 
 on:
   push:
     branches: [main]
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Docker Hub Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push inference image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./python-inference
+          push: true
+          tags: kimheeseon/sentitrack-inference:latest
+
+      - name: Build and push gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./gateway
+          push: true
+          tags: kimheeseon/sentitrack-gateway:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: kimheeseon/sentitrack-frontend:latest
+
+      - name: Deploy to OCI via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            mkdir -p ~/SentiTrack
             cd ~/SentiTrack
-            git pull origin main
-            docker compose -f docker-compose.prod.yml up --build -d
+
+            if [ ! -f docker-compose.prod.yml ]; then
+              echo "docker-compose.prod.yml not found"
+              exit 1
+            fi
+
+            docker network inspect shared-net >/dev/null 2>&1 || docker network create shared-net
+
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
             docker image prune -f

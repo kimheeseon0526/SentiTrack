@@ -39,6 +39,10 @@
 - `frontend/app/archive/page.tsx` — `ArchiveReview` 로컬 타입 추가 (productName 포함)
 - `frontend/components/ArchiveCard.tsx` — `ArchiveReview` 타입으로 수정
 - `frontend/app/api/products/[id]/reviews/route.ts` — `Authorization` 헤더 gateway 포워딩 추가 (누락으로 인한 401 버그 수정)
+- `frontend/components/HeroSection.tsx` — 신규 생성. Client Component. 히어로 섹션 (eyebrow, 타이틀, 설명, 4단계 플로우, 향수 둘러보기/MY ARCHIVE 버튼)
+- `frontend/app/page.tsx` — HeroSection 추가, 상품 목록에 id="products" 앵커 추가 (스크롤 대상)
+- `.github/workflows/deploy.yml` — 신규 생성. main 브랜치 push 시 EC2 SSH 자동 배포 (appleboy/ssh-action, git pull → docker compose prod up)
+- `docker-compose.prod.yml` — 운영용 재작성. nginx-proxy, letsencrypt, restart:always, shared-net(external), JWT/Resend secrets 환경변수 주입, db 서비스 + 볼륨 포함
 - `gateway/migrations/003_add_scent_category.sql` — `sentitrack_products`에 `scent_category` 컬럼 추가 및 10개 상품 카테고리 값 설정
 - `gateway/src/server.ts` — `/api/me/reviews` 쿼리에 `p.scent_category` 추가, 응답에 `scentCategory` 필드 포함
 - `frontend/lib/types.ts` — `MyReview`에 `scentCategory: string` 추가

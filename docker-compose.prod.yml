@@ -31,7 +31,7 @@ services:
     restart: always
 
   inference:
-    build: ./python-inference
+    image: kimheeseon/sentitrack-inference:latest
     container_name: sentitrack-inference
     expose:
       - "8000"
@@ -48,7 +48,7 @@ services:
     restart: always
 
   gateway:
-    build: ./gateway
+    image: kimheeseon/sentitrack-gateway:latest
     container_name: sentitrack-gateway
     environment:
       INFERENCE_URL: http://sentitrack-inference:8000/predict
@@ -73,7 +73,7 @@ services:
     restart: always
 
   frontend:
-    build: ./frontend
+    image: kimheeseon/sentitrack-frontend:latest
     container_name: sentitrack-frontend
     environment:
       GATEWAY_URL: http://sentitrack-gateway:4000
