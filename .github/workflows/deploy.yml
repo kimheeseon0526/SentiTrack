@@ -23,21 +23,21 @@ jobs:
         with:
           context: ./python-inference
           push: true
-          tags: kimheeseon/sentitrack-inference:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sentitrack-inference:latest
 
       - name: Build and push gateway image
         uses: docker/build-push-action@v6
         with:
           context: ./gateway
           push: true
-          tags: kimheeseon/sentitrack-gateway:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sentitrack-gateway:latest
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
           push: true
-          tags: kimheeseon/sentitrack-frontend:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sentitrack-frontend:latest
 
       - name: Deploy to OCI via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -45,6 +45,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 30m
           script: |
             cd ~
 
@@ -56,8 +57,26 @@ jobs:
             cd ~/sentitrack
             git pull origin main
 
+            # GitHub Secrets를 기반으로 한 안전한 .env 파일 실시간 생성
+            cat > .env <<'EOF'
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            EOF
+
+            chmod 600 .env
+
+            # 외부 Docker 네트워크 존재 확인 및 없으면 생성
             docker network inspect shared-net >/dev/null 2>&1 || docker network create shared-net
 
+            # 컨테이너 갱신 및 재시작
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
+
+            # 최종 실행 상태 출력하여 GitHub Actions 로그에서 확인 가능하도록 조치
+            echo "=== 최종 배포 컨테이너 상태 ==="
+            docker compose -f docker-compose.prod.yml ps
+            
+            # 불필요한 레이어 정리
             docker image prune -f
