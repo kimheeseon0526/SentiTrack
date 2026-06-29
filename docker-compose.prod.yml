@@ -68,7 +68,7 @@ services:
       - shared-net
     depends_on:
       inference:
-        condition: service_healthy   # 💡 위에서 inference 설정을 늘려주어 여기서 안전하게 기다립니다.
+        condition: service_started
       db:
         condition: service_healthy
     restart: always

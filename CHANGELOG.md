@@ -2,6 +2,20 @@
 
 ---
 
+## 2026-06-30
+
+### 변경 사항
+
+- `docker-compose.prod.yml` — gateway의 `depends_on.inference` 조건을 `service_healthy` → `service_started`로 변경
+
+### 이유
+
+- inference(Python ML 서버)는 KoELECTRA 모델 로딩에 시간이 걸려 헬스체크를 통과하지 못하면 gateway가 아예 기동되지 않는 문제가 있었음
+- `/api/products`(향수 목록), `/api/auth/*`(로그인/회원가입) 등은 inference와 무관한데도 gateway 미기동으로 전부 실패함
+- gateway 코드는 이미 inference 미응답 시 502를 반환하도록 처리되어 있으므로, gateway를 먼저 띄우고 inference가 준비되면 리뷰 분석 기능이 활성화되는 방식으로 변경
+
+---
+
 ## 2026-06-22
 
 ### 변경 사항
