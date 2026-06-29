@@ -43,7 +43,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 10m  # 💡 1번 조치: AI 모델 로딩 및 헬스체크 대기를 위해 타임아웃을 10분으로 연장!
+          timeout: 30m  #  1번 조치: AI 모델 로딩 및 헬스체크 대기를 위해 타임아웃을 10분으로 연장!
           script: |
             if [ ! -d ~/sentitrack/.git ]; then
               rm -rf ~/sentitrack
