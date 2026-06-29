@@ -39,12 +39,13 @@ services:
       - mlruns-data:/app/mlruns
     networks:
       - shared-net
+    # 💡 [여기 수정] 가상 메모리(Swap) 환경을 고려하여 헬스체크 임계치 대폭 연장!
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
+      interval: 15s       # 체크 간격을 15초로 약간 늘림
+      timeout: 10s        # 응답 타임아웃을 10초로 연장
+      retries: 20         # 실패 시 조기 종료하지 않고 20번까지 끈질기게 재시도
+      start_period: 90s   # 컨테이너가 켜진 후 처음 90초 동안은 모델 로딩 중이므로 실패해도 무시
     restart: always
 
   gateway:
@@ -67,7 +68,7 @@ services:
       - shared-net
     depends_on:
       inference:
-        condition: service_healthy
+        condition: service_healthy   # 💡 위에서 inference 설정을 늘려주어 여기서 안전하게 기다립니다.
       db:
         condition: service_healthy
     restart: always
