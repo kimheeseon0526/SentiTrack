@@ -43,7 +43,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 30m  #  1번 조치: AI 모델 로딩 및 헬스체크 대기를 위해 타임아웃을 10분으로 연장!
+          timeout: 30m  # 💡 플러그인이 10분 만에 연결 끊는 것을 방지 (30분으로 연장)
           script: |
             if [ ! -d ~/sentitrack/.git ]; then
               rm -rf ~/sentitrack
@@ -52,7 +52,6 @@ jobs:
             cd ~/sentitrack
             git pull origin main
 
-            # 💡 2번 조치: GitHub Secrets를 사용해 OCI 서버에 실시간으로 .env 파일 생성하기
             echo "DB_USER=${{ secrets.DB_USER }}" > .env
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
             echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
@@ -60,7 +59,5 @@ jobs:
 
             docker network inspect shared-net >/dev/null 2>&1 || docker network create shared-net
             docker compose -f docker-compose.prod.yml pull
-            
-            # .env가 적용된 상태로 컨테이너 실행
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
