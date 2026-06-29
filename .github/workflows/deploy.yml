@@ -43,7 +43,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 30m  # 💡 플러그인이 10분 만에 연결 끊는 것을 방지 (30분으로 연장)
+          timeout: 30m  # 💡 [핵심] 플러그인 자체 10분 제한 벽을 30분으로 허물어버립니다!
           script: |
             if [ ! -d ~/sentitrack/.git ]; then
               rm -rf ~/sentitrack
