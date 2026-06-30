@@ -1,4 +1,5 @@
-import { FastifyInstance } from "fastify";
+import { randomInt } from "node:crypto";
+import { FastifyInstance, FastifyReply } from "fastify";
 import bcrypt from "bcryptjs";
 import mysql from "mysql2/promise";
 import pool from "./db.js";
@@ -7,6 +8,24 @@ import { sendVerificationEmail } from "./email.js";
 
 const VERIFICATION_CODE_TTL_MINUTES = 10;
 const BCRYPT_SALT_ROUNDS = 10;
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const SIGNUP_REQUEST_RATE_LIMIT = { max: 5, windowMs: RATE_LIMIT_WINDOW_MS };
+const SIGNUP_VERIFY_RATE_LIMIT = { max: 10, windowMs: RATE_LIMIT_WINDOW_MS };
+const LOGIN_RATE_LIMIT = { max: 10, windowMs: RATE_LIMIT_WINDOW_MS };
+
+interface RateLimitPolicy {
+  max: number;
+  windowMs: number;
+}
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+const signupRequestRateLimit = new Map<string, RateLimitEntry>();
+const signupVerifyRateLimit = new Map<string, RateLimitEntry>();
+const loginRateLimit = new Map<string, RateLimitEntry>();
 
 interface UserRow extends mysql.RowDataPacket {
   id: number;
@@ -23,11 +42,46 @@ interface VerificationRow extends mysql.RowDataPacket {
 }
 
 function generateVerificationCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getRateLimitKey(ip: string, email: string | undefined): string {
+  return `${ip}:${email?.trim().toLowerCase() || "unknown"}`;
+}
+
+function checkRateLimit(
+  store: Map<string, RateLimitEntry>,
+  key: string,
+  policy: RateLimitPolicy
+): { allowed: true } | { allowed: false; retryAfterSeconds: number } {
+  const now = Date.now();
+  const entry = store.get(key);
+
+  if (!entry || entry.resetAt <= now) {
+    store.set(key, { count: 1, resetAt: now + policy.windowMs });
+    return { allowed: true };
+  }
+
+  if (entry.count >= policy.max) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.ceil((entry.resetAt - now) / 1000),
+    };
+  }
+
+  entry.count += 1;
+  return { allowed: true };
+}
+
+function sendRateLimitExceeded(reply: FastifyReply, retryAfterSeconds: number) {
+  return reply
+    .header("Retry-After", retryAfterSeconds.toString())
+    .status(429)
+    .send({ error: "too many requests, please try again later" });
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
@@ -35,6 +89,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     "/api/auth/signup/request",
     async (request, reply) => {
       const { email, password } = request.body;
+      const rateLimit = checkRateLimit(
+        signupRequestRateLimit,
+        getRateLimitKey(request.ip, email),
+        SIGNUP_REQUEST_RATE_LIMIT
+      );
+
+      if (!rateLimit.allowed) {
+        return sendRateLimitExceeded(reply, rateLimit.retryAfterSeconds);
+      }
 
       if (!email || !isValidEmail(email)) {
         return reply.status(400).send({ error: "valid email is required" });
@@ -84,6 +147,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     "/api/auth/signup/verify",
     async (request, reply) => {
       const { email, code } = request.body;
+      const rateLimit = checkRateLimit(
+        signupVerifyRateLimit,
+        getRateLimitKey(request.ip, email),
+        SIGNUP_VERIFY_RATE_LIMIT
+      );
+
+      if (!rateLimit.allowed) {
+        return sendRateLimitExceeded(reply, rateLimit.retryAfterSeconds);
+      }
 
       if (!email || !code) {
         return reply.status(400).send({ error: "email and code are required" });
@@ -135,6 +207,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     "/api/auth/login",
     async (request, reply) => {
       const { email, password } = request.body;
+      const rateLimit = checkRateLimit(
+        loginRateLimit,
+        getRateLimitKey(request.ip, email),
+        LOGIN_RATE_LIMIT
+      );
+
+      if (!rateLimit.allowed) {
+        return sendRateLimitExceeded(reply, rateLimit.retryAfterSeconds);
+      }
 
       if (!email || !password) {
         return reply.status(400).send({ error: "email and password are required" });

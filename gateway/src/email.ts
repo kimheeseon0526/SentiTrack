@@ -1,6 +1,7 @@
 import { Resend } from "resend";
+import { requireEnv } from "./env.js";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(requireEnv("RESEND_API_KEY"));
 const FROM_ADDRESS = process.env.RESEND_FROM_ADDRESS ?? "onboarding@levelupseon.com";
 
 export async function sendVerificationEmail(email: string, code: string): Promise<void> {

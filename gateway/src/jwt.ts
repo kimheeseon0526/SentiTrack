@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
+import { requireEnv } from "./env.js";
 
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret-change-in-production";
+const JWT_SECRET = requireEnv("JWT_SECRET");
 const JWT_EXPIRES_IN = "30d";
 
 export interface JwtPayload {

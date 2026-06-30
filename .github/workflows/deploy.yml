@@ -12,6 +12,26 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Validate required deployment secrets
+        run: |
+          set -e
+
+          missing=""
+          [ -n "$DB_USER" ] || missing="$missing DB_USER"
+          [ -n "$DB_PASSWORD" ] || missing="$missing DB_PASSWORD"
+          [ -n "$JWT_SECRET" ] || missing="$missing JWT_SECRET"
+          [ -n "$RESEND_API_KEY" ] || missing="$missing RESEND_API_KEY"
+
+          if [ -n "$missing" ]; then
+            echo "Missing required GitHub Secrets:$missing"
+            exit 1
+          fi
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+
       - name: Docker Hub Login
         uses: docker/login-action@v3
         with:

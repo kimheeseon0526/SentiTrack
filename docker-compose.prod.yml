@@ -55,12 +55,12 @@ services:
       INFERENCE_URL: http://sentitrack-inference:8000/predict
       DB_HOST: sentitrack-db
       DB_PORT: 3306
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_USER: ${DB_USER:?DB_USER is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       DB_NAME: sentitrack
       ALLOWED_ORIGIN: https://sentitrack.levelupseon.com
-      JWT_SECRET: ${JWT_SECRET}
-      RESEND_API_KEY: ${RESEND_API_KEY}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      RESEND_API_KEY: ${RESEND_API_KEY:?RESEND_API_KEY is required}
       RESEND_FROM_ADDRESS: onboarding@levelupseon.com
     expose:
       - "4000"
@@ -93,17 +93,17 @@ services:
     image: mysql:8.0
     container_name: sentitrack-db
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       MYSQL_DATABASE: sentitrack
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_USER: ${DB_USER:?DB_USER is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     volumes:
       - db-data:/var/lib/mysql
       - ./gateway/migrations:/docker-entrypoint-initdb.d
     networks:
       - shared-net
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD:?DB_PASSWORD is required}"]
       interval: 10s
       timeout: 5s
       retries: 10
