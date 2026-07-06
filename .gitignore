@@ -22,6 +22,7 @@ mlartifacts/
 *.pt
 *.bin
 *.pkl
+python-inference/evaluation/llm_sentiment_cache.jsonl
 
 # Volumes & logs
 volumes/
@@ -30,3 +31,4 @@ logs/
 
 # Misc
 .DS_Store
+python-inference/evaluation/*_report.json
