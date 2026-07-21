@@ -13,7 +13,7 @@ export interface Review {
   productId: number;
   userId: number;
   reviewText: string;
-  sentimentLabel: "POSITIVE" | "NEGATIVE";
+  sentimentLabel: "POSITIVE" | "NEGATIVE" | "MIXED";
   confidenceScore: number;
   modelVersion: string;
   latencyMs: number;

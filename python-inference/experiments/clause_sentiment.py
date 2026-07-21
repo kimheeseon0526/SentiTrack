@@ -11,7 +11,7 @@ ANALYSIS_METHOD = "CLAUSE_HYBRID"
 MIN_CLAUSE_LENGTH = 4
 
 STANDALONE_CONNECTORS = ("하지만", "그러나", "그런데", "근데", "다만", "반면", "반면에")
-ENDING_CONNECTORS = ("지만", "는데", "은데", "ㄴ데")
+ENDING_CONNECTORS = ("지만", "는데", "은데", "인데", "ㄴ데")
 
 Predictor = Callable[[str], dict[str, Any]]
 

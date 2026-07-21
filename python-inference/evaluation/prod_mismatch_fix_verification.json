@@ -1,0 +1,47 @@
+[
+  {
+    "id": "prod-2",
+    "text": "제일 좋아하는 꽃향인데 조금 인공적인거 같아요ㅠㅠㅠ",
+    "pre_fix_label": "POSITIVE",
+    "pre_fix_confidence": 0.6702,
+    "post_fix_label": "MIXED",
+    "post_fix_confidence": 0.6702,
+    "post_fix_model_version": "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
+  },
+  {
+    "id": "synthetic-1",
+    "text": "향은 정말 좋은데 지속력이 별로예요.",
+    "pre_fix_label": "NEGATIVE",
+    "pre_fix_confidence": 0.9768,
+    "post_fix_label": "NEGATIVE",
+    "post_fix_confidence": 0.9768,
+    "post_fix_model_version": "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
+  },
+  {
+    "id": "synthetic-2",
+    "text": "디자인은 예쁘지만 향이 너무 약해요.",
+    "pre_fix_label": "NEGATIVE",
+    "pre_fix_confidence": 0.9731,
+    "post_fix_label": "NEGATIVE",
+    "post_fix_confidence": 0.9731,
+    "post_fix_model_version": "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
+  },
+  {
+    "id": "synthetic-3",
+    "text": "포장은 마음에 드는데 배송이 너무 느렸어요.",
+    "pre_fix_label": "NEGATIVE",
+    "pre_fix_confidence": 0.8921,
+    "post_fix_label": "NEGATIVE",
+    "post_fix_confidence": 0.8921,
+    "post_fix_model_version": "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
+  },
+  {
+    "id": "synthetic-4",
+    "text": "가격은 비싸지만 향은 정말 좋아요.",
+    "pre_fix_label": "POSITIVE",
+    "pre_fix_confidence": 0.9049,
+    "post_fix_label": "POSITIVE",
+    "post_fix_confidence": 0.9049,
+    "post_fix_model_version": "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
+  }
+]

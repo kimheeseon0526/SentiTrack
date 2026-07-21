@@ -1,12 +1,15 @@
 import os
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 
 import mlflow
 import mlflow.sklearn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import pipeline
+
+from experiments.clause_sentiment import analyze_clause_sentiment
 
 MODEL_NAME = "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
 MODEL_REVISION = "370f325ce11aabd837b89bfb3ffdc26fde354689"
@@ -57,17 +60,27 @@ def health():
     return {"status": "ok", "model_loaded": sentiment_pipeline is not None}
 
 
+def _predict_clause(text: str) -> dict[str, Any]:
+    raw_result = sentiment_pipeline(text)[0]
+    return {
+        "raw_label": raw_result["label"],
+        "score": float(raw_result["score"]),
+        "normalized_label": normalize_label(raw_result["label"]),
+    }
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
     if sentiment_pipeline is None:
         raise HTTPException(status_code=503, detail="Model is not loaded yet")
 
     start = time.perf_counter()
-    result = sentiment_pipeline(request.text)[0]
+    analysis = analyze_clause_sentiment(request.text, _predict_clause)
     latency_ms = (time.perf_counter() - start) * 1000
 
-    normalized_label = normalize_label(result["label"])
-    confidence_score = float(result["score"])
+    normalized_label = analysis["experimental_label"]
+    # MIXED일 때도 baseline_confidence를 그대로 씀: 원문 전체를 단일 라벨로 봤을 때의 확신도이며, MIXED 판정 자체나 clause별 확신도가 아님.
+    confidence_score = float(analysis["baseline_confidence"])
 
     with mlflow.start_run():
         mlflow.log_param("model_name", MODEL_NAME)
@@ -75,6 +88,7 @@ def predict(request: PredictRequest):
         mlflow.log_metric("confidence_score", confidence_score)
         mlflow.log_metric("latency_ms", latency_ms)
         mlflow.set_tag("predicted_label", normalized_label)
+        mlflow.set_tag("contrast_detected", analysis["contrast_detected"])
 
     return PredictResponse(
         label=normalized_label,

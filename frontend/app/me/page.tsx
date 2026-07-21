@@ -11,6 +11,24 @@ interface ScentStat {
   count: number;
 }
 
+const SENTIMENT_COLORS: Record<MyReview["sentimentLabel"], { bg: string; border: string; text: string }> = {
+  POSITIVE: {
+    bg: "var(--color-positive-bg)",
+    border: "var(--color-positive-border)",
+    text: "var(--color-positive-text)",
+  },
+  NEGATIVE: {
+    bg: "var(--color-negative-bg)",
+    border: "var(--color-negative-border)",
+    text: "var(--color-negative-text)",
+  },
+  MIXED: {
+    bg: "var(--color-mixed-bg)",
+    border: "var(--color-mixed-border)",
+    text: "var(--color-mixed-text)",
+  },
+};
+
 function computeScentStats(reviews: MyReview[], label: "POSITIVE" | "NEGATIVE"): ScentStat[] {
   const filtered = reviews.filter((r) => r.sentimentLabel === label);
   const counts = new Map<string, number>();
@@ -96,7 +114,8 @@ export default function MyArchivePage() {
   }
 
   const positiveCount = reviews.filter((r) => r.sentimentLabel === "POSITIVE").length;
-  const negativeCount = reviews.length - positiveCount;
+  const negativeCount = reviews.filter((r) => r.sentimentLabel === "NEGATIVE").length;
+  const mixedCount = reviews.filter((r) => r.sentimentLabel === "MIXED").length;
   const favoriteScents = computeScentStats(reviews, "POSITIVE");
   const dislikedScents = computeScentStats(reviews, "NEGATIVE");
 
@@ -174,6 +193,14 @@ export default function MyArchivePage() {
                 </span>
                 <span style={statLabelStyle}>아쉬운 리뷰</span>
               </div>
+              {mixedCount > 0 && (
+                <div style={statBoxStyle}>
+                  <span style={{ ...statNumberStyle, color: "var(--color-mixed-text)" }}>
+                    {mixedCount}
+                  </span>
+                  <span style={statLabelStyle}>혼합 리뷰</span>
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: "28px" }}>
@@ -194,15 +221,8 @@ export default function MyArchivePage() {
               <div
                 key={review.id}
                 style={{
-                  backgroundColor:
-                    review.sentimentLabel === "POSITIVE"
-                      ? "var(--color-positive-bg)"
-                      : "var(--color-negative-bg)",
-                  borderLeft: `4px solid ${
-                    review.sentimentLabel === "POSITIVE"
-                      ? "var(--color-positive-border)"
-                      : "var(--color-negative-border)"
-                  }`,
+                  backgroundColor: SENTIMENT_COLORS[review.sentimentLabel].bg,
+                  borderLeft: `4px solid ${SENTIMENT_COLORS[review.sentimentLabel].border}`,
                   padding: "16px 20px",
                   marginBottom: "10px",
                   boxShadow: "0 1px 3px rgba(58, 46, 38, 0.05)",

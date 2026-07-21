@@ -2,17 +2,33 @@ import { Review } from "@/lib/types";
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
 
+const SENTIMENT_STYLES: Record<Review["sentimentLabel"], { bg: string; border: string; text: string }> = {
+  POSITIVE: {
+    bg: "var(--color-positive-bg)",
+    border: "var(--color-positive-border)",
+    text: "var(--color-positive-text)",
+  },
+  NEGATIVE: {
+    bg: "var(--color-negative-bg)",
+    border: "var(--color-negative-border)",
+    text: "var(--color-negative-text)",
+  },
+  MIXED: {
+    bg: "var(--color-mixed-bg)",
+    border: "var(--color-mixed-border)",
+    text: "var(--color-mixed-text)",
+  },
+};
+
 export default function ReviewCard({ review }: { review: Review }) {
-  const isPositive = review.sentimentLabel === "POSITIVE";
+  const sentimentStyle = SENTIMENT_STYLES[review.sentimentLabel];
   const isLowConfidence = Number(review.confidenceScore) < LOW_CONFIDENCE_THRESHOLD;
 
   return (
     <div
       style={{
-        backgroundColor: isPositive ? "var(--color-positive-bg)" : "var(--color-negative-bg)",
-        borderLeft: `4px solid ${
-          isPositive ? "var(--color-positive-border)" : "var(--color-negative-border)"
-        }`,
+        backgroundColor: sentimentStyle.bg,
+        borderLeft: `4px solid ${sentimentStyle.border}`,
         padding: "16px 20px",
         marginBottom: "10px",
         boxShadow: "0 1px 3px rgba(58, 46, 38, 0.05)",
@@ -31,7 +47,7 @@ export default function ReviewCard({ review }: { review: Review }) {
         </p>
         <span
           style={{
-            color: isPositive ? "var(--color-positive-text)" : "var(--color-negative-text)",
+            color: sentimentStyle.text,
             fontWeight: 700,
             fontSize: "13px",
             letterSpacing: "0.05em",
@@ -39,7 +55,7 @@ export default function ReviewCard({ review }: { review: Review }) {
             paddingTop: "2px",
           }}
         >
-          {isPositive ? "POSITIVE" : "NEGATIVE"}
+          {review.sentimentLabel}
         </span>
       </div>
 

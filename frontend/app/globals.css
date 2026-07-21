@@ -12,6 +12,9 @@
   --color-negative-bg: #faedea;
   --color-negative-border: #d9a99e;
   --color-negative-text: #a35c4f;
+  --color-mixed-bg: #f7f0e2;
+  --color-mixed-border: #d3b676;
+  --color-mixed-text: #9c7a2e;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -312,6 +315,17 @@ textarea {
   letter-spacing: 0.06em;
   color: var(--color-negative-text);
   background-color: var(--color-negative-bg);
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ac-badge-mixed {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--color-mixed-text);
+  background-color: var(--color-mixed-bg);
   padding: 3px 8px;
   white-space: nowrap;
   flex-shrink: 0;

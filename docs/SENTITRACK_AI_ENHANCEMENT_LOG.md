@@ -763,3 +763,78 @@ git diff --stat
 - 사용자가 실제 provider 환경변수를 설정한 뒤 5~10건 chunk로 실행한다.
 - `RATE_LIMIT`이 발생하면 같은 output path에 대해 `--resume --use-cache`로 재실행한다.
 - 여러 chunk가 누적된 뒤 full40 report의 successful/failed count와 normalized aspect metrics를 다시 검토한다.
+
+## 260721
+
+### 작업명
+대조/혼합 문장이 POSITIVE로 오분류되는 운영 버그 수정 (clause split + MIXED를 `/predict`에 실제 반영)
+
+### 작업 목적
+- "부정 리뷰가 긍정으로 표시되는 오류" 제보 건을 조사 → 원인 확정 → 수정 → 검증까지 진행한다.
+- 앞선 실험 단계(3~6단계)에서는 clause split/normalization/LLM 실험을 offline report로만 남기고 운영 코드(`main.py`, Gateway, Frontend)는 건드리지 않았는데, 이번 단계에서는 그 실험 결과 중 `clause_sentiment.py`를 실제 `/predict`에 연결해 운영 버그를 고친다.
+- 기존 리뷰 데이터 재분석/재채점, `NEUTRAL` 도입, DB root/app 비밀번호 분리는 범위에서 제외한다.
+
+### 작업 전 상태 — 운영 DB 점검 (읽기 전용, OCI 168.110.109.236)
+- 지정된 LIKE 패턴(별로/실망/아쉬/안좋/최악/하지만/그런데/지만/좋은데)으로 조회 시 0건 — 운영 DB의 리뷰가 총 2건뿐이었기 때문.
+- 전체 2건을 직접 확인: id=2 `"제일 좋아하는 꽃향인데 조금 인공적인거 같아요ㅠㅠㅠ"`가 `POSITIVE 0.6702`로 저장되어 있고, 대조 어미 "인데"로 이어지는 전형적인 혼합 문장이었음. id=1은 정상.
+- 대표 사례가 1건뿐이라 사용자 승인을 받아 이 사례 + 합성 대조 문장 4건(향은 정말 좋은데 지속력이 별로예요 / 디자인은 예쁘지만 향이 너무 약해요 / 포장은 마음에 드는데 배송이 너무 느렸어요 / 가격은 비싸지만 향은 정말 좋아요)으로 재현 범위를 넓혔다.
+
+### 원인 진단 — 케이스 B(모델 오분류) 확정, 케이스 A(model_version 불일치)는 배제
+- **케이스 A 배제 근거**: `python-inference/main.py`는 초기 커밋(2026-06-22, `52a713f`) 이후 수정 이력이 없어 `MODEL_NAME`/`MODEL_REVISION`이 리뷰 생성 시점(2026-06-30)부터 지금까지 동일. `gateway/src/server.ts`도 `/predict` 응답의 `model_version`을 캐싱 없이 그대로 저장만 한다. id=2 원문을 현재 파이프라인에 그대로 넣어 재현한 결과 `POSITIVE 0.6702`로 저장값과 완전히 일치 — 캐싱/버전 기록 버그가 아님.
+- **케이스 B 확정**: KoELECTRA 이진 분류기가 문장 전체를 하나의 라벨로 압축하면서 대조 문장의 결론절(부정)을 무시하고 도입부(긍정) 쪽으로 판단.
+- 추가로, 이미 구현돼 있던 `experiments/clause_sentiment.py`를 실제 연결하는 과정에서 `ENDING_CONNECTORS`에 `"인데"`가 빠져 있는 걸 발견 — id=2가 "인데" 뒤에서 clause split 자체가 안 돼 대조 감지가 안 됐던 것. `experiments/clause_normalization.py`의 `SIMPLE_SUFFIX_RULES`에는 이미 `("인데", "이다.")` 규칙이 있어 정규화 쪽은 "인데"를 대조 어미로 인지하고 있었는데, split 쪽 목록에만 반영이 안 돼 있었던 두 모듈 간 불일치였음.
+
+### 변경한 파일과 이유
+| 파일 | 변경 | 이유 |
+|---|---|---|
+| `python-inference/experiments/clause_sentiment.py` | `ENDING_CONNECTORS`에 `"인데"` 추가 | "인데"로 끝나는 대조절이 clause split 대상에서 누락되어 있었음 |
+| `python-inference/main.py` | `/predict`에서 `sentiment_pipeline(text)` 단일 호출 대신 `analyze_clause_sentiment(text, _predict_clause)` 사용. `label`이 `experimental_label`(POSITIVE/NEGATIVE/MIXED)이 되도록 변경, MLflow에 `contrast_detected` 태그 추가 | 대조 문장을 clause 단위로 재분류해 두 절 confidence가 모두 0.7 이상으로 갈릴 때만 `MIXED` 반환 (false-MIXED 방지 로직은 기존 실험 모듈 그대로 재사용) |
+| `python-inference/Dockerfile` | `COPY experiments ./experiments` 추가 | `main.py`가 `experiments.clause_sentiment`를 import하게 됐는데, 기존 Dockerfile은 `main.py`만 이미지에 복사해 실제 배포 시 `ModuleNotFoundError`로 컨테이너가 죽었을 것 — 배포 전에 발견해 같이 수정 |
+| `frontend/lib/types.ts` | `sentimentLabel` 타입에 `"MIXED"` 추가 | 새 라벨 값을 타입 시스템에 반영 |
+| `frontend/app/globals.css` | `--color-mixed-*` 변수, `.ac-badge-mixed` 클래스 추가 | MIXED 전용 배지 색상 (기존 각진 무테두리 디자인 원칙 유지) |
+| `frontend/components/ReviewCard.tsx`, `ArchiveCard.tsx` | `isPositive` 불리언 삼항 연산 → `sentimentLabel` 기반 색상/배지 매핑 테이블로 교체 | 기존 구조는 `isPositive ? "POSITIVE" : "NEGATIVE"`라 MIXED가 들어오면 화면에 "NEGATIVE"로 잘못 표시됐을 것 |
+| `frontend/app/me/page.tsx` | `negativeCount = reviews.length - positiveCount` → `NEGATIVE` 직접 필터링 + `mixedCount` 통계 박스 추가, 리뷰 카드 배경색도 매핑 테이블 기반으로 변경 | 기존 계산식은 MIXED 리뷰를 전부 "아쉬운 리뷰" 수치에 합산해버리는, 지금 고치는 것과 같은 클래스의 버그였음 |
+| `python-inference/scripts/reproduce_prod_mismatch.py`, `verify_prod_mismatch_fix.py` (신규) | 운영 사례 재현 및 수정 전/후 비교 스크립트 | 재현 결과를 파일로 남겨 검증 근거로 사용 |
+
+DB 스키마(`sentitrack_reviews.sentiment_label VARCHAR(20)`)는 ENUM이 아니라 `"MIXED"` 저장에 ALTER 불필요 — 실행하지 않음. gateway도 라벨을 그대로 통과시키는 구조라 변경 없음.
+
+### 실행한 명령
+```bash
+python python-inference/scripts/reproduce_prod_mismatch.py
+python -m pytest python-inference/tests -q
+python python-inference/scripts/verify_prod_mismatch_fix.py
+cd gateway && npm run build
+cd frontend && npm run build
+```
+
+### 재현 테스트 결과 (수정 전 / 후 비교)
+같은 모델/revision(`jaehyeong/koelectra-base-v3-generalized-sentiment-analysis`, `370f325c...`)을 로컬에 로드해 재현.
+
+| 사례 | 문장 | 수정 전 | 수정 후 |
+|---|---|---|---|
+| prod-2 (운영 id=2) | 제일 좋아하는 꽃향인데 조금 인공적인거 같아요ㅠㅠㅠ | POSITIVE 0.6702 | **MIXED** 0.6702 |
+| synthetic-1 | 향은 정말 좋은데 지속력이 별로예요. | NEGATIVE 0.9768 | NEGATIVE 0.9768 (회귀 없음) |
+| synthetic-2 | 디자인은 예쁘지만 향이 너무 약해요. | NEGATIVE 0.9731 | NEGATIVE 0.9731 (회귀 없음) |
+| synthetic-3 | 포장은 마음에 드는데 배송이 너무 느렸어요. | NEGATIVE 0.8921 | NEGATIVE 0.8921 (회귀 없음) |
+| synthetic-4 | 가격은 비싸지만 향은 정말 좋아요. | POSITIVE 0.9049 | POSITIVE 0.9049 (회귀 없음) |
+
+원본 데이터: `python-inference/evaluation/prod_mismatch_reproduction.json`(수정 전), `prod_mismatch_fix_verification.json`(수정 후).
+
+추가 검증:
+- `python-inference/tests` 전체 147개 테스트 통과 (`ENDING_CONNECTORS` 변경 후 재실행, 기존 `test_clause_sentiment.py` 포함 회귀 없음)
+- `gateway`: `npm run build`(`tsc`) 성공
+- `frontend`: `npm run build`(`next build`, TypeScript 체크 포함) 성공
+
+### 남은 문제
+- **MIXED confidence_score는 baseline(원문장 전체) 확신도를 재사용**하며, clause별 확신도나 MIXED 판정 자체의 확신도가 아님. 추후 최종 평가(3단계) 때 재설계 검토 필요.
+- 운영 DB의 id=2는 여전히 `POSITIVE`로 남아 있음 — 기존 리뷰 재평가는 이번 범위에서 제외했으므로 신규 리뷰부터만 정확히 기록됨.
+- confidence threshold(0.7) 미만인 대조 문장은 여전히 이진 라벨로 남음 (synthetic-1/2/3처럼 한쪽 절 confidence가 낮으면 안전하게 baseline으로 폴백 — false-MIXED 방지가 의도된 동작이지만 일부 진짜 혼합 문장은 여전히 놓칠 수 있음).
+- `ENDING_CONNECTORS`는 하드코딩 목록: "인데"는 추가했지만 "치고", "라도", 어미 없는 문맥적 대조 등은 여전히 미탐지.
+- 대조 표현이 감지되면 `/predict` 1회 호출이 최대 3회 모델 추론(전체 문장 + 절 2개)으로 늘어남 — 별도 성능/레이턴시 테스트는 하지 않음.
+- 운영 데이터가 2건뿐이라 실제 트래픽에서의 커버리지는 사실상 검증되지 않은 상태 — 리뷰가 더 쌓이면 재점검 필요.
+- `ProductReviewSection`의 필터는 "전체보기/긍정적 향기/아쉬운 향기" 3개뿐이며 MIXED 전용 필터 탭은 추가하지 않음 (전체보기에서는 정상 노출, 범위 최소화를 위해 신규 필터 UI는 넣지 않음).
+
+### 다음 작업
+- 이번 커밋이 배포된 뒤 신규 리뷰에서 실제로 MIXED가 정상 기록/표시되는지 운영 환경에서 모니터링한다.
+- 기존 리뷰(id=2 포함) 재분석 여부와 방식(배치 재채점 스크립트 등)을 별도로 결정한다.
+- root/app DB 비밀번호 분리는 별도 작업으로 진행한다.

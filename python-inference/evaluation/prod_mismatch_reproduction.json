@@ -1,0 +1,40 @@
+[
+  {
+    "id": "prod-2",
+    "text": "제일 좋아하는 꽃향인데 조금 인공적인거 같아요ㅠㅠㅠ",
+    "stored_label": "POSITIVE",
+    "stored_confidence": 0.6702,
+    "stored_model_version": "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis",
+    "source": "OCI prod sentitrack_reviews.id=2 (created_at 2026-06-30 09:32:04)",
+    "reproduced_label": "POSITIVE",
+    "reproduced_confidence": 0.6702
+  },
+  {
+    "id": "synthetic-1",
+    "text": "향은 정말 좋은데 지속력이 별로예요.",
+    "source": "synthetic",
+    "reproduced_label": "NEGATIVE",
+    "reproduced_confidence": 0.9768
+  },
+  {
+    "id": "synthetic-2",
+    "text": "디자인은 예쁘지만 향이 너무 약해요.",
+    "source": "synthetic",
+    "reproduced_label": "NEGATIVE",
+    "reproduced_confidence": 0.9731
+  },
+  {
+    "id": "synthetic-3",
+    "text": "포장은 마음에 드는데 배송이 너무 느렸어요.",
+    "source": "synthetic",
+    "reproduced_label": "NEGATIVE",
+    "reproduced_confidence": 0.8921
+  },
+  {
+    "id": "synthetic-4",
+    "text": "가격은 비싸지만 향은 정말 좋아요.",
+    "source": "synthetic",
+    "reproduced_label": "POSITIVE",
+    "reproduced_confidence": 0.9049
+  }
+]

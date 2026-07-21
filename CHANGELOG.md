@@ -15,6 +15,24 @@
 - 실제 운영 서버(OCI, 168.110.109.236) 점검 결과 `sentitrack_reviews.user_id`, `sentitrack_products.scent_category` 컬럼은 이미 반영되어 있었으나(볼륨이 002/003 추가 이후 재생성됨), 향후 동일한 문제가 재발하지 않도록 배포 파이프라인에서 매 배포마다 마이그레이션을 직접 적용하도록 재발 방지 로직을 추가함
 - 002, 003 SQL은 `IF NOT EXISTS`/stored procedure 가드로 이미 idempotent하게 작성되어 있어 매 배포마다 재실행해도 안전함
 - root 계정 사용 시 인증 실패 확인: 운영 DB의 `MYSQL_ROOT_PASSWORD`는 볼륨 최초 생성 시에만 적용되는데, 이후 `.env`의 `DB_PASSWORD` 시크릿이 로테이션되면서 root 비밀번호와 어긋난 상태였음. 앱 계정(`sentitrack_user`)은 `sentitrack` 스키마에 대해 `ALL PRIVILEGES`를 보유하고 있고 마이그레이션 파일들도 스키마 범위 내 DDL만 사용해 앱 계정으로도 충분히 실행 가능하여, root 대신 앱 계정을 사용하도록 변경
+- `python-inference/experiments/clause_sentiment.py` — `ENDING_CONNECTORS`에 `"인데"` 추가
+- `python-inference/main.py` — `/predict`가 `analyze_clause_sentiment`를 통해 대조 문장을 clause 단위로 재분류하고 `POSITIVE`/`NEGATIVE`/`MIXED`를 반환하도록 변경, MLflow에 `contrast_detected` 태그 추가
+- `python-inference/Dockerfile` — `COPY experiments ./experiments` 추가
+- `frontend/lib/types.ts` — `sentimentLabel`에 `"MIXED"` 추가
+- `frontend/app/globals.css` — `--color-mixed-*` 변수 및 `.ac-badge-mixed` 클래스 추가
+- `frontend/components/ReviewCard.tsx`, `ArchiveCard.tsx` — `isPositive` 불리언 삼항 연산을 `sentimentLabel` 기반 매핑 테이블로 교체
+- `frontend/app/me/page.tsx` — `negativeCount` 계산식을 `NEGATIVE` 직접 필터링으로 수정, `mixedCount` 통계 박스 추가
+- `python-inference/scripts/reproduce_prod_mismatch.py`, `verify_prod_mismatch_fix.py` — 신규 생성 (운영 오분류 사례 재현/검증 스크립트)
+- `docs/SENTITRACK_AI_ENHANCEMENT_LOG.md` — 원인 진단, 변경 내역, 재현 테스트 결과, 남은 문제 기록
+
+### 이유 (감성 오분류 수정)
+
+- "부정 리뷰가 긍정으로 표시되는 오류" 제보로 운영 DB(OCI)를 읽기 전용 점검한 결과, 리뷰 id=2 "제일 좋아하는 꽃향인데 조금 인공적인거 같아요ㅠㅠㅠ"가 `POSITIVE 0.6702`로 저장돼 있었음
+- model_version/캐싱 불일치(케이스 A)는 재현 결과 저장값과 완전히 일치해 배제. KoELECTRA 이진 분류기가 대조/혼합 문장을 하나의 라벨로 압축하는 구조적 한계(케이스 B)로 확정
+- 이미 구현돼 있던 `experiments/clause_sentiment.py`(clause split)를 실제 `/predict`에 연결하는 과정에서 `ENDING_CONNECTORS`에 "인데"가 빠져 있어 해당 사례가 clause split조차 안 되던 것을 추가로 발견해 같이 수정
+- Dockerfile이 `main.py`만 복사하고 `experiments/`는 복사하지 않아, `main.py`의 신규 import가 배포 시 `ModuleNotFoundError`로 컨테이너를 죽였을 것을 배포 전에 발견해 같이 수정
+- frontend의 `isPositive ? "POSITIVE" : "NEGATIVE"` 및 `negativeCount = total - positiveCount` 패턴은 POSITIVE가 아닌 모든 값(신규 MIXED 포함)을 NEGATIVE로 잘못 표시/집계하는 구조라 같이 수정
+- 수정 전/후 재현 스크립트로 대상 사례(POSITIVE → MIXED)와 4개 합성 사례(회귀 없음)를 비교 검증, `python-inference` 147개 테스트 및 gateway/frontend 빌드 통과 확인
 
 ---
 

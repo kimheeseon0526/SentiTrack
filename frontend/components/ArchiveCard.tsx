@@ -3,8 +3,13 @@ import { Review } from "@/lib/types";
 
 type ArchiveReview = Review & { productName?: string };
 
+const BADGE_CLASS: Record<Review["sentimentLabel"], string> = {
+  POSITIVE: "ac-badge-positive",
+  NEGATIVE: "ac-badge-negative",
+  MIXED: "ac-badge-mixed",
+};
+
 export default function ArchiveCard({ review }: { review: ArchiveReview }) {
-  const isPositive = review.sentimentLabel === "POSITIVE";
   const isLowConfidence = review.confidenceScore < 0.7;
 
   const dateLabel = review.createdAt
@@ -21,9 +26,7 @@ export default function ArchiveCard({ review }: { review: ArchiveReview }) {
         <Link href={`/products/${review.productId}`} className="ac-product">
           {review.productName ?? `#${review.productId}`}
         </Link>
-        <span className={isPositive ? "ac-badge-positive" : "ac-badge-negative"}>
-          {isPositive ? "POSITIVE" : "NEGATIVE"}
-        </span>
+        <span className={BADGE_CLASS[review.sentimentLabel]}>{review.sentimentLabel}</span>
       </div>
 
       <p className="ac-text">{review.reviewText}</p>
