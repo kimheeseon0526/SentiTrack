@@ -4,6 +4,21 @@
 
 ## 2026-07-21
 
+### 변경 사항 (README·AI 고도화 로그 문서 정리)
+
+- `README.md` — 신규 생성. 프로젝트 개요, 주요 기능, 기술 스택/서비스 구조, 실행 방법, 운영 주소, AI 고도화 최종 확정 지표, 현재 한계, 상세 문서 링크
+- `docs/SENTITRACK_AI_ENHANCEMENT_LOG.md` — 기존 날짜별 기록은 보존하고 다음만 추가:
+  - 이후 단계에서 해소된 과거 "다음 작업"/"남은 문제" 항목에 `[해결됨]`/`[부분 해결]` 태그와 해결 커밋 참조 추가 (삭제 없음)
+  - "수치 구분: 오프라인 실험값 vs 실제 프로덕션(`/predict`) 최종값" 절 추가 — 같은 수치(예: MIXED Recall 0.30)가 오프라인 실험 단계와 실제 배포 단계 양쪽에 등장해 혼동될 수 있는 부분을 표로 명시적 구분
+  - 문서 최하단에 "기술 부채" 섹션 신설 — LLM 캐시 last-write-wins 재현성 문제, DB root/app 비밀번호 불일치, OpenRouter 40건 중 9건 미평가, 기존 운영 리뷰 재채점 미실시를 한 곳에 모아 추적
+- `docs/sessions/2026-07-21-summary.md`는 이미 시간순 기록·커밋 번호를 포함하고 있어 변경 없음
+
+### 이유
+
+- 목표 4(문서화)에 따라 포트폴리오 열람자가 README만 보고 프로젝트를 파악하고, 세부 근거는 상세 문서로 찾아갈 수 있도록 정리
+- AI 고도화 로그가 여러 실험 단계에 걸쳐 누적되며 같은 지표가 반복 등장해 어떤 값이 최종적으로 운영에 반영된 값인지 구분하기 어려워졌던 문제를 해결
+- 미해결 항목이 날짜별 기록 곳곳에 흩어져 있어 다음 작업자가 놓치기 쉬웠던 것을 한 곳에서 추적 가능하게 함
+
 ### 변경 사항 (배포 파이프라인 동시 실행 방지)
 
 - `.github/workflows/deploy.yml` — `concurrency: { group: deploy-production, cancel-in-progress: false }` 추가
@@ -47,7 +62,7 @@
 ### 이유
 
 - `gateway/migrations/002_add_users.sql`, `003_add_scent_category.sql`이 `docker-entrypoint-initdb.d`로 마운트되어 있는데, 이 방식은 MySQL 데이터 볼륨이 "처음" 생성될 때만 실행되어, 이미 존재하는 볼륨에는 신규 마이그레이션 파일이 자동 반영되지 않는 구조적 문제가 있었음
-- 실제 운영 서버(OCI, 168.110.109.236) 점검 결과 `sentitrack_reviews.user_id`, `sentitrack_products.scent_category` 컬럼은 이미 반영되어 있었으나(볼륨이 002/003 추가 이후 재생성됨), 향후 동일한 문제가 재발하지 않도록 배포 파이프라인에서 매 배포마다 마이그레이션을 직접 적용하도록 재발 방지 로직을 추가함
+- 실제 운영 서버(OCI 운영 서버) 점검 결과 `sentitrack_reviews.user_id`, `sentitrack_products.scent_category` 컬럼은 이미 반영되어 있었으나(볼륨이 002/003 추가 이후 재생성됨), 향후 동일한 문제가 재발하지 않도록 배포 파이프라인에서 매 배포마다 마이그레이션을 직접 적용하도록 재발 방지 로직을 추가함
 - 002, 003 SQL은 `IF NOT EXISTS`/stored procedure 가드로 이미 idempotent하게 작성되어 있어 매 배포마다 재실행해도 안전함
 - root 계정 사용 시 인증 실패 확인: 운영 DB의 `MYSQL_ROOT_PASSWORD`는 볼륨 최초 생성 시에만 적용되는데, 이후 `.env`의 `DB_PASSWORD` 시크릿이 로테이션되면서 root 비밀번호와 어긋난 상태였음. 앱 계정(`sentitrack_user`)은 `sentitrack` 스키마에 대해 `ALL PRIVILEGES`를 보유하고 있고 마이그레이션 파일들도 스키마 범위 내 DDL만 사용해 앱 계정으로도 충분히 실행 가능하여, root 대신 앱 계정을 사용하도록 변경
 - `python-inference/experiments/clause_sentiment.py` — `ENDING_CONNECTORS`에 `"인데"` 추가
