@@ -4,6 +4,15 @@
 
 ## 2026-07-21
 
+### 변경 사항 (배포 파이프라인 동시 실행 방지)
+
+- `.github/workflows/deploy.yml` — `concurrency: { group: deploy-production, cancel-in-progress: false }` 추가
+
+### 이유
+
+- 오늘 짧은 간격으로 연달아 push된 두 워크플로가 동시 실행 제어 없이 같은 OCI 서버에 SSH 배포를 동시에 실행하면서 서버 load average가 9.56까지 상승했고, 이후 오래된 쪽을 취소하는 과정에서 containerd에 dangling lease가 남아 남은 배포의 `docker compose pull`이 25분 넘게 완전히 멈추는 문제가 있었음
+- `cancel-in-progress: false`로 설정해 먼저 실행 중인 배포를 강제 중단시키지 않고, 뒤에 트리거된 워크플로는 대기열에서 순차 실행되도록 해서 애초에 두 배포가 동시에 같은 서버를 건드리는 상황 자체를 막음
+
 ### 변경 사항 (clause_normalization을 /predict에 연결)
 
 - `python-inference/experiments/clause_sentiment.py` — `analyze_clause_sentiment()`에 `clause_normalizer` 선택적 인자 추가 (기본값 `None`이면 기존 동작과 동일), 절 예측 직전에만 적용

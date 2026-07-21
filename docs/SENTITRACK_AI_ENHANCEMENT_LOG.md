@@ -951,3 +951,19 @@ MIXED 골드 10건 중 eval-023, eval-024, eval-028이 새로 정확히 MIXED로
 ### 다음 작업
 - 운영 배포 후 실제 트래픽에서 정규화가 정상 동작하는지 모니터링한다 (MLflow `contrast_detected` 태그로 절 분리 발생 빈도 확인 가능).
 - eval-030류 트레이드오프가 실제 서비스에서 체감될 정도인지는 리뷰가 더 쌓인 뒤 재평가한다.
+
+### 작업명
+배포 파이프라인 동시 실행 경합 재발 방지 — `deploy.yml`에 `concurrency` 그룹 추가
+
+### 원인
+- `6bdb4f4`, `8b5e869`가 6분 간격으로 연달아 push되면서 `deploy.yml`에 동시 실행 제어가 없어 **두 워크플로가 같은 OCI 서버에 SSH 배포를 동시에 실행**함.
+- 두 프로세스가 동일한 Docker 이미지를 동시에 pull하며 서버 load average가 9.56까지 상승. 이후 오래된 쪽 워크플로를 취소하자, 진행 중이던 이미지 레이어 추출 작업이 중간에 끊기면서 containerd에 **dangling lease**(정리되지 않은 임시 리소스)가 남았고, 남아있던 다른 pull이 같은 레이어를 기다리며 완전히 멈춤(hang) — CPU 사용률 0%로 25분 이상 무응답.
+- (실제로는 별도 조치 없이 얼마 후 자연 해소되어 배포가 정상 완료됐으나, 근본 원인인 "동시 배포 경합"은 남아있어 재발 가능.)
+
+### 조치
+- `.github/workflows/deploy.yml` 상단에 `concurrency: { group: deploy-production, cancel-in-progress: false }` 추가.
+- `cancel-in-progress: false`로 설정한 이유: 먼저 실행 중인 배포를 강제 취소하면 오늘처럼 중간에 끊긴 작업이 dangling 리소스를 남길 수 있음 — 대신 뒤에 트리거된 워크플로를 **대기열에 넣어 순차 실행**되도록 해서, 애초에 두 배포가 동시에 같은 서버를 건드리는 상황 자체를 막음.
+
+### 검증
+- `python -c "import yaml; yaml.safe_load(...)"`로 YAML 문법 파싱 확인, `concurrency` 블록 정상 인식.
+- 실제 배포는 트리거하지 않고 diff만 검토 후 반영.
