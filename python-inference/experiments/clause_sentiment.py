@@ -135,6 +135,7 @@ def analyze_clause_sentiment(
     text: str,
     predictor: Predictor,
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+    clause_normalizer: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
     baseline_prediction = {"label": "NEGATIVE", "confidence": 0.0}
     try:
@@ -166,10 +167,12 @@ def analyze_clause_sentiment(
 
         clause_predictions = []
         for clause in raw_clauses:
-            prediction = normalize_prediction(predictor(clause))
+            normalized_text = clause_normalizer(clause) if clause_normalizer is not None else clause
+            prediction = normalize_prediction(predictor(normalized_text))
             clause_predictions.append(
                 {
                     "text": clause,
+                    "normalized_text": normalized_text if clause_normalizer is not None else None,
                     "label": prediction["label"],
                     "confidence": prediction["confidence"],
                     "raw_label": prediction.get("raw_label"),

@@ -3,7 +3,7 @@ def test_health_check_model_loaded(client_with_model):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "model_loaded": True}
-
+ 
 
 def test_predict_positive_review(client_with_model):
     response = client_with_model.post(
@@ -57,3 +57,10 @@ def test_normalize_label_handles_numeric_strings(client_with_model, monkeypatch)
     assert main.normalize_label("LABEL_0") == "NEGATIVE"
     assert main.normalize_label("POSITIVE") == "POSITIVE"
     assert main.normalize_label("NEGATIVE") == "NEGATIVE"
+
+
+def test_normalize_clause_text_applies_simple_declarative_normalization():
+    import main
+
+    assert main._normalize_clause_text("향은 정말 좋았지만") == "향은 정말 좋았다."
+    assert main._normalize_clause_text("지속력이 별로예요.") == "지속력이 별로예요."

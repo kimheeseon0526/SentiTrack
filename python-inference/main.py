@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import pipeline
 
+from experiments.clause_normalization import SIMPLE_DECLARATIVE, normalize_clause
 from experiments.clause_sentiment import analyze_clause_sentiment
 
 MODEL_NAME = "jaehyeong/koelectra-base-v3-generalized-sentiment-analysis"
@@ -69,13 +70,19 @@ def _predict_clause(text: str) -> dict[str, Any]:
     }
 
 
+def _normalize_clause_text(clause: str) -> str:
+    return normalize_clause(clause, SIMPLE_DECLARATIVE).normalized_text
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
     if sentiment_pipeline is None:
         raise HTTPException(status_code=503, detail="Model is not loaded yet")
 
     start = time.perf_counter()
-    analysis = analyze_clause_sentiment(request.text, _predict_clause)
+    analysis = analyze_clause_sentiment(
+        request.text, _predict_clause, clause_normalizer=_normalize_clause_text
+    )
     latency_ms = (time.perf_counter() - start) * 1000
 
     normalized_label = analysis["experimental_label"]

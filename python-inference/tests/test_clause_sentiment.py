@@ -6,6 +6,7 @@ import pytest
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
+from experiments.clause_normalization import SIMPLE_DECLARATIVE, normalize_clause  # noqa: E402
 from experiments.clause_sentiment import (  # noqa: E402
     analyze_clause_sentiment,
     combine_clause_predictions,
@@ -179,3 +180,54 @@ def test_same_sentiment_two_clauses_keep_same_label():
     ]
 
     assert combine_clause_predictions("POSITIVE", predictions, 0.7) == "NEGATIVE"
+
+
+def _simple_declarative_normalizer(clause):
+    return normalize_clause(clause, SIMPLE_DECLARATIVE).normalized_text
+
+
+def test_clause_normalizer_applies_to_clauses_not_baseline():
+    text = "향은 정말 좋았지만 지속력이 별로예요."
+    clauses = split_contrast_clauses(text)
+    assert clauses == ["향은 정말 좋았지만", "지속력이 별로예요."]
+
+    normalized_first = _simple_declarative_normalizer(clauses[0])
+    assert normalized_first == "향은 정말 좋았다."
+
+    calls = []
+
+    def predictor(input_text):
+        calls.append(input_text)
+        mapping = {
+            text: ("NEGATIVE", 0.95),
+            normalized_first: ("POSITIVE", 0.9),
+            clauses[1]: ("NEGATIVE", 0.92),
+        }
+        label, confidence = mapping[input_text]
+        return {"normalized_label": label, "score": confidence, "raw_label": "1" if label == "POSITIVE" else "0"}
+
+    result = analyze_clause_sentiment(text, predictor, clause_normalizer=_simple_declarative_normalizer)
+
+    assert calls == [text, normalized_first, clauses[1]]
+    assert result["experimental_label"] == "MIXED"
+    assert result["clauses"][0]["normalized_text"] == normalized_first
+    assert result["clauses"][0]["text"] == clauses[0]
+    assert result["clauses"][1]["normalized_text"] == clauses[1]
+
+
+def test_no_clause_normalizer_keeps_existing_behavior():
+    text = "향은 너무 좋지만 지속력이 별로예요."
+    clauses = split_contrast_clauses(text)
+    predictor = predictor_from(
+        {
+            text: ("NEGATIVE", 0.96),
+            clauses[0]: ("POSITIVE", 0.91),
+            clauses[1]: ("NEGATIVE", 0.92),
+        }
+    )
+
+    result = analyze_clause_sentiment(text, predictor)
+
+    assert result["experimental_label"] == "MIXED"
+    assert result["clauses"][0]["normalized_text"] is None
+    assert result["clauses"][1]["normalized_text"] is None

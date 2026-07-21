@@ -4,6 +4,18 @@
 
 ## 2026-07-21
 
+### 변경 사항 (clause_normalization을 /predict에 연결)
+
+- `python-inference/experiments/clause_sentiment.py` — `analyze_clause_sentiment()`에 `clause_normalizer` 선택적 인자 추가 (기본값 `None`이면 기존 동작과 동일), 절 예측 직전에만 적용
+- `python-inference/main.py` — `clause_normalization.py`의 `normalize_clause`/`SIMPLE_DECLARATIVE`를 연결하는 `_normalize_clause_text()` wrapper 추가, `/predict`가 정규화된 절 텍스트로 예측하도록 변경
+- `python-inference/tests/test_clause_sentiment.py`, `test_main.py` — 신규 정규화 배선 동작 검증 테스트 3개 추가
+
+### 이유
+
+- 목표 3 최종 평가에서 확인된 갭(프로덕션 MIXED Recall 0.20 vs 오프라인 실험 최고치 0.30)을 해소하기 위해, 이미 검증된 `clause_normalization.py`(SIMPLE_DECLARATIVE)를 배선만 함
+- 재측정 결과 MIXED Recall 0.20 → **0.30**으로 개선 확인 (오프라인 실험 수치와 정확히 일치), POSITIVE/NEGATIVE 정확도 1.0 유지(회귀 없음), false MIXED 0건(신규 오탐 없음)
+- 전체 테스트 150개(기존 147 + 신규 3) 통과
+
 ### 변경 사항 (목표 3: KoELECTRA·Normalization·LLM 최종 평가)
 
 - `python-inference/scripts/evaluate_predict_endpoint.py` — 신규 생성. 실제 `/predict` 엔드포인트를 40건 데이터셋에 호출해 재측정하는 스크립트

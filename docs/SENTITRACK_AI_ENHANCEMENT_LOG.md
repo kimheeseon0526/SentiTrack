@@ -911,5 +911,43 @@ KoELECTRA 단일 문장 분류는 대조/혼합 리뷰에서 MIXED를 20%만 잡
 
 ### 다음 작업
 - 실제 LLM API 자격 증명을 확보하면 40건 중 나머지 9건을 `--resume --use-cache`로 완료하고, aspect F1은 반드시 단일 연속 세션에서 새로 측정해 캐시 오염 없는 수치로 확정한다.
-- KoELECTRA MIXED Recall을 0.30으로 끌어올리려면 clause normalization을 `/predict`에 연결할지 여부를 별도 작업으로 결정한다.
+- ~~KoELECTRA MIXED Recall을 0.30으로 끌어올리려면 clause normalization을 `/predict`에 연결할지 여부를 별도 작업으로 결정한다.~~ → 같은 날 후속 작업으로 연결 완료 (아래 참고).
 - LLM 캐시 재현성 문제(last-write-wins)를 회귀 테스트 인프라 관점에서 어떻게 다룰지 결정한다 (예: run별 캐시 파일 분리, 캐시 항목 불변화 등).
+
+### 작업명
+clause_normalization을 `/predict`에 연결 — KoELECTRA MIXED Recall 0.20 → 0.30
+
+### 작업 목적
+- 앞선 최종 평가에서 확인된 갭(프로덕션 MIXED Recall 0.20 vs 오프라인 실험 최고치 0.30)을 해소한다.
+- 새 기능/모델 추가 없이, 이미 오프라인 실험으로 검증된 `clause_normalization.py`(SIMPLE_DECLARATIVE)를 기존 clause split 파이프라인에 배선만 한다.
+
+### 구현
+- `experiments/clause_sentiment.py`: `analyze_clause_sentiment()`에 `clause_normalizer: Callable[[str], str] | None = None` 선택적 인자 추가. 절 단위 예측 직전에만 적용하고 baseline(전체 문장) 예측에는 적용하지 않음 — 기본값 `None`이면 기존 동작과 100% 동일. `clauses[i]`에 `normalized_text` 필드 추가(정규화 미적용 시 `None`).
+- `main.py`: `experiments/clause_normalization.py`에서 `normalize_clause`, `SIMPLE_DECLARATIVE` import, `_normalize_clause_text()` wrapper 추가, `analyze_clause_sentiment(request.text, _predict_clause, clause_normalizer=_normalize_clause_text)`로 전달.
+- `Dockerfile` 변경 없음 (오늘 오전 버그 수정 때 이미 `experiments/` 전체를 이미지에 복사하도록 고쳐둔 상태라 정규화 모듈도 자동 포함됨).
+- 새 pip 의존성 없음.
+
+### 테스트
+- `tests/test_clause_sentiment.py`: `clause_normalizer`가 절에만 적용되고 baseline에는 적용되지 않는지, 정규화로 절 label이 바뀌어 MIXED가 확정되는지, `clause_normalizer` 미지정 시 `normalized_text`가 `None`으로 기존 동작을 유지하는지 검증하는 테스트 2개 추가.
+- `tests/test_main.py`: `main._normalize_clause_text()` wrapper 단위 테스트 1개 추가.
+- 전체 재실행: **150 passed** (기존 147 + 신규 3, 회귀 없음).
+
+### 재측정 결과 (실제 `/predict`, 40건, 연결 전/후 비교)
+| 지표 | 연결 전 | 연결 후 |
+|---|---|---|
+| MIXED Recall | 0.20 | **0.30** |
+| MIXED Precision | 1.0 | 1.0 |
+| POSITIVE/NEGATIVE 정확도 | 1.0 | **1.0** (회귀 없음) |
+| False MIXED | 0 | **0** (신규 오탐 없음) |
+| 4-class exact match (40건) | 22/40=0.55 | 23/40=0.575 |
+
+MIXED 골드 10건 중 eval-023, eval-024, eval-028이 새로 정확히 MIXED로 판별됐다 (기존 오프라인 SIMPLE_DECLARATIVE 실험의 개선 사례와 정확히 일치). eval-030은 연결 전 MIXED로 맞았다가 연결 후 POSITIVE로 바뀌어 오답이 됐는데, 이는 새로운 문제가 아니라 기존 오프라인 실험에서도 동일하게 나타났던 트레이드오프(순증 +1건, 0.20→0.30과 정확히 부합)다. "인데" 접속 처리를 오늘 오전 추가했음에도 이 40건 데이터셋에는 해당 어미 사례가 없어 이번에도 영향 없음. 산출물: `evaluation/predict_endpoint_full40_report.json`(갱신).
+
+### 남은 문제
+- eval-030 같은 개별 트레이드오프 케이스가 존재 — 정규화가 항상 순이익만 주는 것은 아니며, 이번엔 순증이 더 컸을 뿐이다.
+- `HANGUL_AWARE_DECLARATIVE`(더 공격적인 정규화 전략)는 이번에 연결하지 않았다 — 오프라인 실험에서 `SIMPLE_DECLARATIVE`와 동일한 성능이었어서 더 단순한 쪽을 선택.
+- MIXED confidence_score는 여전히 baseline(원문 전체) 확신도를 그대로 씀 — 이번 변경과 무관하게 기존 제약 유지.
+
+### 다음 작업
+- 운영 배포 후 실제 트래픽에서 정규화가 정상 동작하는지 모니터링한다 (MLflow `contrast_detected` 태그로 절 분리 발생 빈도 확인 가능).
+- eval-030류 트레이드오프가 실제 서비스에서 체감될 정도인지는 리뷰가 더 쌓인 뒤 재평가한다.
