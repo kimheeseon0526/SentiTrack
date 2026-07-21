@@ -838,3 +838,78 @@ cd frontend && npm run build
 - 이번 커밋이 배포된 뒤 신규 리뷰에서 실제로 MIXED가 정상 기록/표시되는지 운영 환경에서 모니터링한다.
 - 기존 리뷰(id=2 포함) 재분석 여부와 방식(배치 재채점 스크립트 등)을 별도로 결정한다.
 - root/app DB 비밀번호 분리는 별도 작업으로 진행한다.
+
+### 작업명
+목표 3 최종 평가 — KoELECTRA·Normalization·LLM 수치 재검증 (실제 `/predict` 기준)
+
+### 작업 목적
+- 앞서 기록된 오프라인 실험 수치(clause 실험, normalization 실험, LLM taxonomy 실험)를 실제 운영 코드(`main.py`의 `/predict`, 오늘 수정된 clause split + MIXED 로직)와 실제 저장된 LLM 캐시로 다시 검증해, 포트폴리오에 인용할 최종 수치를 확정한다.
+- 새 기능/모델 추가 없이 기존 구현의 정확성 검증에만 집중한다.
+
+### 1단계 — KoELECTRA + clause split 재측정 (실제 `/predict`, 40건)
+- 데이터셋: `python-inference/evaluation/sentiment_eval_reviews.jsonl` (POSITIVE10/NEGATIVE10/MIXED10/NEUTRAL10). 기존 기록 참조 파일: `evaluation/clause_normalization_report.json`.
+- 신규 스크립트 `python-inference/scripts/evaluate_predict_endpoint.py`로 실제 `/predict` 엔드포인트(오늘 수정된 clause split + MIXED 로직)를 40건 전체에 호출해 재측정.
+
+| 지표 | 기존 기록 RAW(offline) | 기존 기록 SIMPLE_DECLARATIVE(offline) | 이번 재측정 (실제 /predict) |
+|---|---|---|---|
+| MIXED Recall | 0.20 | 0.30 | **0.20** |
+| MIXED Precision | 1.0 | 1.0 | 1.0 |
+| MIXED F1 | 0.333 | 0.4615 | 0.333 |
+| POSITIVE/NEGATIVE Accuracy | 1.0 | 1.0 | 1.0 |
+| 4-class exact match (전체 40건) | 22/40=0.55 | 23/40=0.575 | 22/40=0.55 |
+
+Confusion Matrix (실제 `/predict`, gold×predicted): POSITIVE 10/10, NEGATIVE 10/10, MIXED→{POSITIVE 2, NEGATIVE 6, MIXED 2}, NEUTRAL→{POSITIVE 5, NEGATIVE 5}(모델이 NEUTRAL을 출력하지 않으므로 설계상 0). MIXED 정답 2건(eval-028, eval-030)은 과거 "RAW"(정규화 미적용) 실험과 완전히 동일.
+
+**차이 원인**: `main.py`의 `/predict`는 `experiments/clause_sentiment.py`(절 분리)만 연결했고, MIXED Recall을 0.20→0.30으로 올렸던 `clause_normalization.py`(절 텍스트 정규화, 예: "좋지만"→"좋다.")는 실제 엔드포인트에 배선되지 않았다. 즉 0.30은 오프라인 실험에서만 확인된 수치이고, 프로덕션의 정직한 현재 수치는 **0.20**이다. 오늘 추가한 `ENDING_CONNECTORS`의 "인데"는 이 40건 데이터셋에 해당 어미 사례가 없어 영향 없음. 산출물: `evaluation/predict_endpoint_full40_report.json`.
+
+### 2단계 — LLM v1 + taxonomy 12건 재확인
+- 이 환경에는 `SENTITRACK_LLM_API_KEY`/`MODEL`/`BASE_URL`이 프로세스/사용자/머신 어떤 범위에도 설정되어 있지 않음(레포 `.env`에도 없음) — 확인 결과 실제 API 호출 자체가 불가능한 상태.
+- 12건 텍스트가 `model=openrouter/free, prompt_version=sentiment-aspect-v1, schema_version=llm-sentiment-schema-v1` 조합으로 전부(12/12) 이미 캐시에 존재함을 확인 → `evaluate_llm_sentiment.py --use-cache`로 실제 네트워크 호출 0건인 재실행 수행 (`evaluation/llm_sentiment_v1_reverify_report.json`).
+- 결과: `exact_match_accuracy = 0.9167`(11/12, 기존 1.0). `eval-033` 1건만 gold(NEUTRAL)와 불일치(POSITIVE로 예측).
+- 원인 조사: `eval-033`의 캐시 원문을 기존 리포트와 비교한 결과, 기존 리포트는 `cache_hit:false`(최초 실제 호출)였고 현재 캐시는 다른 세션에서 같은 텍스트로 다시 호출된 **비결정적 응답으로 덮어써진 상태**였음. `experiments/llm_sentiment_client.py`의 `JsonlLLMCache`는 append-only JSONL을 순서대로 읽어 같은 cache_key를 **나중 값이 덮어쓰는(last-write-wins)** 구조라, 이후 세션(예: 40건 시도)에서 겹치는 텍스트를 재호출하면 조용히 과거 캐시가 교체됨.
+- 영향 범위를 더 넓게 확인하니 12건 중 8건의 `predicted_aspects`가 원본 리포트와 다른 내용(예: `scent`→`smell`, `health`→`headache`, 영어↔한글 aspect명 혼재)으로 바뀌어 있었음 — overall_label은 대부분 안 바뀌었지만 aspect 이름 자체가 달라짐.
+- `evaluate_aspect_taxonomy.py`로 재계산한 taxonomy 정규화 aspect F1: **0.4667** (raw 0.2051) — 기존 기록 0.9032/raw 0.65와 크게 다름. **이는 taxonomy 정규화 코드의 결함이 아니라 캐시 재사용의 재현성 한계다.** 산출물: `evaluation/aspect_taxonomy_reverify_report.json`.
+- 판단: overall 정확도(0.9167)와 기존 aspect F1(0.9032, 단일 세션 실측치)은 여전히 유효한 기록으로 유지하되, "캐시 기반 재현은 aspect 이름 수준에서 신뢰할 수 없다"는 사실을 새로운 제약사항으로 기록한다.
+
+### 3단계 — OpenRouter 40건 전체 평가 시도
+- 2단계에서 확인한 것과 동일한 이유로 실제 API 호출이 불가능함. 가짜 자격증명으로 `--resume`을 강행하면 캐시에 없는 9건에 대해 OpenRouter로 인증 실패 요청을 실제로 보내게 되어(무의미하고 사용자 지시 위반) 시도하지 않았다.
+- 대신 신규 스크립트 `python-inference/scripts/evaluate_llm_cache_only.py`를 작성해 실행 — 기존 `evaluate_llm_sentiment.py`의 검증 로직(`evaluate_llm_records`)을 그대로 재사용하되, `OpenAICompatibleAdapter`의 `opener`를 로컬 스텁으로 교체해 **모든 네트워크 시도를 원천 차단**(캐시 히트는 실제로 스키마 검증까지 수행, 캐시 미스는 `NO_LIVE_CALL_SKIPPED`로 기록하고 시도조차 하지 않음).
+- 40건 중 31건이 캐시에 존재(`model/prompt_version/schema_version` 동일 키 기준), 9건은 미시도. 실제 네트워크 호출 0건.
+
+| 지표 | 값 (평가된 31/40건 기준) |
+|---|---|
+| Overall 정확도 | 0.9355 (29/31) |
+| MIXED Precision/Recall/F1 | **1.0 / 1.0 / 1.0** (10/10 캐시 존재, 전부 정답) |
+| NEGATIVE Precision/Recall/F1 | 1.0 / 1.0 / 1.0 (9/10 캐시) |
+| POSITIVE Precision/Recall/F1 | 0.8 / 1.0 / 0.889 (8/10 캐시) |
+| NEUTRAL Precision/Recall/F1 | 1.0 / 0.5 / 0.667 (4/10 캐시) |
+| Aspect name F1 (raw / normalized) | 0.095 / 0.615 |
+
+산출물: `evaluation/llm_sentiment_v1_cacheonly_full40_report.json`. 남은 9건(POSITIVE 2, NEGATIVE 1, NEUTRAL 6)은 실제 API 키가 있어야 완성 가능 — 무리한 재시도 없이 여기서 중단.
+
+### 실행한 명령
+```bash
+python -m pytest python-inference/tests -q
+python python-inference/scripts/evaluate_predict_endpoint.py
+python python-inference/scripts/evaluate_llm_sentiment.py --dataset evaluation/sentiment_eval_representative_12.jsonl --limit 12 --prompt-version sentiment-aspect-v1 --use-cache --output evaluation/llm_sentiment_v1_reverify_report.json
+python python-inference/scripts/evaluate_aspect_taxonomy.py --report evaluation/llm_sentiment_v1_reverify_report.json --dataset evaluation/sentiment_eval_representative_12.jsonl --output evaluation/aspect_taxonomy_reverify_report.json
+python python-inference/scripts/evaluate_llm_cache_only.py --dataset evaluation/sentiment_eval_reviews.jsonl --output evaluation/llm_sentiment_v1_cacheonly_full40_report.json --prompt-version sentiment-aspect-v1
+```
+(2·3단계 모두 `SENTITRACK_LLM_API_KEY`는 캐시 전용 실행에만 필요한 미사용 placeholder 값으로, 실제 네트워크 호출에는 쓰이지 않았음 — 캐시 미스는 전량 로컬에서 스킵 처리됨.)
+
+### 테스트 및 검증 결과
+- `python -m pytest python-inference/tests`: 147 passed, 18 warnings (운영 코드 변경 없음 — 이번 단계는 신규 평가 스크립트만 추가).
+- 모든 재측정에서 실제 OpenRouter API 호출은 0건.
+
+### 포트폴리오 인용 가능 확정 수치 (요약)
+KoELECTRA 단일 문장 분류는 대조/혼합 리뷰에서 MIXED를 20%만 잡아내지만(정밀도는 100%), clause split을 적용해도 절 텍스트 정규화가 프로덕션에 배선되지 않아 실제 운영 수치는 오프라인 실험 최고치(30%)에 못 미치는 20%에 머문다(POSITIVE/NEGATIVE 정확도는 100% 유지, 회귀 없음). 반면 구조화 출력 LLM(OpenRouter 무료 모델, prompt v1)은 캐시로 실제 검증 가능했던 40건 중 31건에서 MIXED를 100% 정밀도/재현율로 판별했고 전체 라벨 정확도 93.6%를 기록해, 대조 문장 판별에서 KoELECTRA 대비 뚜렷한 우위를 실측으로 확인했다. Aspect 수준 추출은 단일 세션 12건 기준 정규화 F1 0.9032(원본 리포트)까지 검증됐으나, 무료 LLM의 비결정성과 캐시의 last-write-wins 특성으로 세션 간 캐시 재사용만으로는 이 수치를 안정적으로 재현할 수 없다는 한계도 함께 확인됐다.
+
+### 남은 문제
+- LLM 캐시(`llm_sentiment_cache.jsonl`)가 세션 간 last-write-wins로 덮어써져 aspect 이름 수준 재현성이 낮음 — 회귀 테스트용으로 쓰려면 캐시 항목에 타임스탬프/버전을 남기고 최초 성공 응답을 보존하는 정책이 필요함 (이번 범위에서는 구현하지 않음).
+- OpenRouter 40건 중 9건은 여전히 미평가 상태 (POSITIVE 2 / NEGATIVE 1 / NEUTRAL 6). 실제 API 키가 확보되면 `--resume --use-cache`로 나머지만 이어서 호출 가능.
+- KoELECTRA MIXED Recall을 0.30 수준으로 올리려면 `clause_normalization.py`의 정규화 단계를 `/predict`에 추가로 배선해야 하는데, 이번 작업(새 기능 추가 금지)에서는 하지 않았다 — 별도 작업으로 남겨둠.
+
+### 다음 작업
+- 실제 LLM API 자격 증명을 확보하면 40건 중 나머지 9건을 `--resume --use-cache`로 완료하고, aspect F1은 반드시 단일 연속 세션에서 새로 측정해 캐시 오염 없는 수치로 확정한다.
+- KoELECTRA MIXED Recall을 0.30으로 끌어올리려면 clause normalization을 `/predict`에 연결할지 여부를 별도 작업으로 결정한다.
+- LLM 캐시 재현성 문제(last-write-wins)를 회귀 테스트 인프라 관점에서 어떻게 다룰지 결정한다 (예: run별 캐시 파일 분리, 캐시 항목 불변화 등).

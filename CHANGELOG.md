@@ -4,6 +4,20 @@
 
 ## 2026-07-21
 
+### 변경 사항 (목표 3: KoELECTRA·Normalization·LLM 최종 평가)
+
+- `python-inference/scripts/evaluate_predict_endpoint.py` — 신규 생성. 실제 `/predict` 엔드포인트를 40건 데이터셋에 호출해 재측정하는 스크립트
+- `python-inference/scripts/evaluate_llm_cache_only.py` — 신규 생성. LLM 캐시에 존재하는 항목만 검증하고 미시도 항목은 네트워크 호출 없이 건너뛰는 스크립트 (`OpenAICompatibleAdapter`의 `opener`를 로컬 스텁으로 교체)
+- `python-inference/evaluation/predict_endpoint_full40_report.json`, `llm_sentiment_v1_reverify_report.json`, `aspect_taxonomy_reverify_report.json`, `llm_sentiment_v1_cacheonly_full40_report.json` — 신규 생성. 재측정 결과 산출물
+- `docs/SENTITRACK_AI_ENHANCEMENT_LOG.md` — 재측정 수치, 기존 기록과의 비교, 원인 분석, 포트폴리오 인용 문단 기록
+
+### 이유
+
+- 오늘 오전 오분류 버그 수정으로 `/predict`가 clause split + MIXED 로직을 실제로 쓰게 됐으므로, 기존에 오프라인 실험 스크립트로만 측정했던 KoELECTRA/normalization 수치를 실제 엔드포인트 기준으로 재확정할 필요가 있었음
+- 재측정 결과 MIXED Recall이 기존 기록(0.30, SIMPLE_DECLARATIVE 실험)이 아니라 0.20(RAW 실험과 동일)으로 나왔음 — `/predict`에는 절 텍스트 정규화 단계가 배선되지 않았기 때문. 프로덕션의 정직한 현재 수치로 기록
+- LLM(OpenRouter) 12건/40건 재평가 과정에서 공유 캐시 파일(`llm_sentiment_cache.jsonl`)이 세션 간 last-write-wins로 덮어써져 aspect 이름 수준 재현성이 낮다는 문제를 발견 — taxonomy 정규화 코드 자체의 결함이 아니라 캐시 재사용의 재현성 한계임을 확인해 기록
+- 이 환경에 LLM API 자격 증명이 전혀 없어(모든 스코프에서 미설정 확인) 실제 API 호출 없이 캐시만으로 안전하게 최대한의 실측치를 뽑아내는 방식(`evaluate_llm_cache_only.py`)을 새로 만들어 사용 — 가짜 자격증명으로 OpenRouter에 무의미한 요청을 보내지 않기 위함
+
 ### 변경 사항
 
 - `.github/workflows/deploy.yml` — "Deploy to OCI via SSH" 스텝의 `docker image prune -f` 다음에 `gateway/migrations/*.sql`을 파일명 순서대로 순회하며 `sentitrack-db` 컨테이너에 적용하는 반복문 추가
