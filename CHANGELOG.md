@@ -2,6 +2,22 @@
 
 ---
 
+## 2026-07-21
+
+### 변경 사항
+
+- `.github/workflows/deploy.yml` — "Deploy to OCI via SSH" 스텝의 `docker image prune -f` 다음에 `gateway/migrations/*.sql`을 파일명 순서대로 순회하며 `sentitrack-db` 컨테이너에 적용하는 반복문 추가
+- 위 반복문의 DB 접속 계정을 root가 아닌 `secrets.DB_USER`/`secrets.DB_PASSWORD`(앱 계정)로 사용
+
+### 이유
+
+- `gateway/migrations/002_add_users.sql`, `003_add_scent_category.sql`이 `docker-entrypoint-initdb.d`로 마운트되어 있는데, 이 방식은 MySQL 데이터 볼륨이 "처음" 생성될 때만 실행되어, 이미 존재하는 볼륨에는 신규 마이그레이션 파일이 자동 반영되지 않는 구조적 문제가 있었음
+- 실제 운영 서버(OCI, 168.110.109.236) 점검 결과 `sentitrack_reviews.user_id`, `sentitrack_products.scent_category` 컬럼은 이미 반영되어 있었으나(볼륨이 002/003 추가 이후 재생성됨), 향후 동일한 문제가 재발하지 않도록 배포 파이프라인에서 매 배포마다 마이그레이션을 직접 적용하도록 재발 방지 로직을 추가함
+- 002, 003 SQL은 `IF NOT EXISTS`/stored procedure 가드로 이미 idempotent하게 작성되어 있어 매 배포마다 재실행해도 안전함
+- root 계정 사용 시 인증 실패 확인: 운영 DB의 `MYSQL_ROOT_PASSWORD`는 볼륨 최초 생성 시에만 적용되는데, 이후 `.env`의 `DB_PASSWORD` 시크릿이 로테이션되면서 root 비밀번호와 어긋난 상태였음. 앱 계정(`sentitrack_user`)은 `sentitrack` 스키마에 대해 `ALL PRIVILEGES`를 보유하고 있고 마이그레이션 파일들도 스키마 범위 내 DDL만 사용해 앱 계정으로도 충분히 실행 가능하여, root 대신 앱 계정을 사용하도록 변경
+
+---
+
 ## 2026-06-30
 
 ### 변경 사항

@@ -92,3 +92,9 @@ jobs:
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
+
+            echo "Applying database migrations..."
+            for f in $(ls gateway/migrations/*.sql | sort); do
+              echo "  -> $f"
+              docker exec -i sentitrack-db mysql -u "${{ secrets.DB_USER }}" -p"${{ secrets.DB_PASSWORD }}" sentitrack < "$f"
+            done
