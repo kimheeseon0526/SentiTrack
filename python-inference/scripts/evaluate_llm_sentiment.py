@@ -348,6 +348,11 @@ def prediction_payload(record: dict[str, Any], call: LLMCallResult) -> dict[str,
         "provider_model": call.model,
         "provider_host": getattr(call, "provider_host", None),
         "actual_model_if_available": getattr(call, "actual_model_if_available", None),
+        # requested_model/resolved_model: see LLMCallResult docstring. For a router
+        # alias like "openrouter/free", resolved_model is the only way to know which
+        # underlying model actually answered this specific request.
+        "requested_model": call.model,
+        "resolved_model": getattr(call, "actual_model_if_available", None),
         "raw_aspect_name_match": diagnostics["raw_aspect_name_matches"],
         "normalized_aspect_name_match": diagnostics["normalized_aspect_name_matches"],
         "raw_pair_match": diagnostics["raw_pair_matches"],
@@ -411,6 +416,8 @@ def failure_payload(
         "provider_model": model,
         "provider_host": provider_host,
         "actual_model_if_available": None,
+        "requested_model": model,
+        "resolved_model": None,  # unknown: the failed call never returned a response body
         "raw_aspect_name_match": diagnostics["raw_aspect_name_matches"],
         "normalized_aspect_name_match": diagnostics["normalized_aspect_name_matches"],
         "raw_pair_match": diagnostics["raw_pair_matches"],
@@ -547,7 +554,23 @@ def calculate_overall_metrics(predictions: list[dict[str, Any]]) -> dict[str, An
         "high_confidence_mismatch": high_confidence_mismatch,
         "average_confidence_by_label": average_confidence_by_label(successful),
         "cache_hit_count": sum(1 for row in successful if row["cache_hit"]),
+        "resolved_model_distribution": resolved_model_distribution(predictions),
     }
+
+
+def resolved_model_distribution(predictions: list[dict[str, Any]]) -> dict[str, int]:
+    """Count predictions by resolved_model. A router alias like "openrouter/free" can
+    answer different requests with different underlying models, so more than one
+    non-"unknown" key here means this run's results must not be reported as a single
+    fixed model's performance. Missing/unknown resolved_model (failures, or legacy
+    cache entries written before resolved_model existed) is bucketed as "unknown"
+    rather than silently dropped."""
+    counts: dict[str, int] = {}
+    for row in predictions:
+        value = row.get("resolved_model")
+        key = value if isinstance(value, str) and value else "unknown"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def calculate_aspect_metrics(predictions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1199,6 +1222,7 @@ def build_dry_run_report(
     offset: int = 0,
     resume: bool = False,
     output_path: Path | None = None,
+    cache_path: Path = DEFAULT_CACHE_PATH,
 ) -> dict[str, Any]:
     missing = missing_configuration()
     model = "CONFIGURATION_MISSING" if missing else load_config_from_env().model
@@ -1248,6 +1272,7 @@ def build_dry_run_report(
         refresh_cache,
         prompt_version,
         schema_version,
+        cache=JsonlLLMCache(cache_path) if (use_cache or refresh_cache) else None,
     )
     expected_cache_hit_count = retry_candidate_count - expected_api_call_count
     dry_run_info = {
@@ -1306,11 +1331,9 @@ def build_dry_run_report(
         provider_type=OpenAICompatibleAdapter.provider_type,
         provider_host=None if missing else load_config_from_env().provider_host,
         model=model,
-        cache_usage={
-            "use_cache": use_cache,
-            "refresh_cache": refresh_cache,
-            "cache_path": str(DEFAULT_CACHE_PATH),
-        },
+        cache_usage=cache_usage_payload(
+            use_cache, refresh_cache, JsonlLLMCache(cache_path) if (use_cache or refresh_cache) else None
+        ),
         run_mode="DRY_RUN_ONLY",
         dry_run_info=dry_run_info,
         prompt_version=prompt_version,
@@ -1376,6 +1399,7 @@ def format_startup_summary(
     expected_api_call_count: int | None = None,
     prompt_version: str = PROMPT_VERSION,
     schema_version: str = SCHEMA_VERSION,
+    cache_path: Path = DEFAULT_CACHE_PATH,
 ) -> str:
     expected = len(selected_records) if expected_api_call_count is None else expected_api_call_count
     actual: int | str = 0 if dry_run else "pending"
@@ -1389,7 +1413,7 @@ def format_startup_summary(
         f"- offset: {offset}",
         f"- requested_limit: {requested_limit}",
         f"- selected_count: {len(selected_records)}",
-        f"- cache: use_cache={use_cache}, refresh_cache={refresh_cache}, path={DEFAULT_CACHE_PATH}",
+        f"- cache: use_cache={use_cache}, refresh_cache={refresh_cache}, path={cache_path}",
         f"- expected_api_call_count: {expected}",
         f"- actual_api_call_count: {actual}",
     ]
@@ -1462,6 +1486,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate LLM structured sentiment offline.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument(
+        "--cache-path",
+        type=Path,
+        default=DEFAULT_CACHE_PATH,
+        help="Path to the JSONL cache file to read/write. Defaults to the shared "
+        f"{DEFAULT_CACHE_PATH.name}. Pass a separate path to run a new experiment "
+        "without ever reading or writing the default cache file.",
+    )
     parser.add_argument("--limit", type=int, default=DEFAULT_SAFE_LIMIT)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--use-cache", action="store_true")
@@ -1534,6 +1566,7 @@ def main_cli() -> int:
             args.refresh_cache,
             prompt_config.prompt_version,
             schema_config.schema_version,
+            cache=JsonlLLMCache(args.cache_path) if (args.use_cache or args.refresh_cache) else None,
         )
 
         print(
@@ -1550,6 +1583,7 @@ def main_cli() -> int:
                 expected_api_call_count=startup_expected_api_calls,
                 prompt_version=prompt_config.prompt_version,
                 schema_version=schema_config.schema_version,
+                cache_path=args.cache_path,
             )
         )
 
@@ -1565,6 +1599,7 @@ def main_cli() -> int:
                 offset=args.offset,
                 resume=args.resume,
                 output_path=args.output,
+                cache_path=args.cache_path,
             )
         else:
             if missing:
@@ -1582,7 +1617,7 @@ def main_cli() -> int:
                 prompt_version=prompt_config.prompt_version,
                 schema_version=schema_config.schema_version,
             )
-            cache = JsonlLLMCache(DEFAULT_CACHE_PATH) if args.use_cache or args.refresh_cache else None
+            cache = JsonlLLMCache(args.cache_path) if args.use_cache or args.refresh_cache else None
             report = evaluate_llm_records_resumable(
                 records,
                 selected_records,

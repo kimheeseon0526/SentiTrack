@@ -4,6 +4,20 @@
 
 ## 2026-07-22
 
+### 변경 사항 (LLM 평가 캐시 경로 분리 및 requested/resolved model 구분 기록)
+
+- `python-inference/scripts/evaluate_llm_sentiment.py` — `--cache-path` CLI 옵션 추가(기본값은 기존 `DEFAULT_CACHE_PATH` 유지, 하위 호환). `main_cli()`, dry-run 경로(`build_dry_run_report`), 시작 요약(`format_startup_summary`), 예상 호출 수 계산(`estimated_call_count`) 4곳 모두 하드코딩된 기본 캐시 경로 대신 `args.cache_path`/`cache_path` 인자를 쓰도록 수정 — 이전에는 dry-run이 `--cache-path`를 지정해도 항상 기본 캐시 기준으로 예상 호출 수를 계산하던 버그가 있었음(이번에 같이 수정)
+- `python-inference/experiments/llm_sentiment_client.py` — `LLMCallResult`에 `.requested_model`/`.resolved_model` 읽기 전용 property 추가(기존 `model`/`actual_model_if_available` 필드는 그대로 유지). 캐시 JSONL 기록에 `requested_model`/`resolved_model` 키 신규 추가(기존 `cache_key_parts.model`/`actual_model_if_available` 키는 유지). `_resolved_model_of()`/`_requested_model_of()` 헬퍼로 신규 키가 없는 과거 캐시 레코드도 예외 없이 로딩되도록 하위 호환 처리
+- `python-inference/scripts/evaluate_llm_sentiment.py` — `prediction_payload()`/`failure_payload()`에 `requested_model`/`resolved_model` 키 추가, `calculate_overall_metrics()`에 `resolved_model_distribution`(모델별 건수, 미확인은 `"unknown"`) 집계 추가
+- `python-inference/tests/test_llm_sentiment_cache_isolation.py` — 신규 파일, 9개 테스트 추가 (160 → 169 passed): `--cache-path` CLI 반영, 지정 경로만 쓰기·기본 캐시 무변경, requested/resolved model 저장, 레거시 캐시(필드 없음/구 필드명만 있음) 하위 호환, router alias가 호출마다 다른 resolved_model을 반환하는 경우 구분 기록, resolved_model별 집계, cache-only 실행 시 외부 호출 0건
+- **새로운 성능 평가를 실행한 것은 아님** — 이번 변경은 캐시 분리·모델 추적 기능만 추가했고, OpenRouter API를 호출하지 않았으며 기존 평가 수치(`0.9677` 등)는 그대로 유지됨
+
+### 이유
+
+- OpenRouter 공식 문서상 `openrouter/free`는 요청마다 사용 가능한 무료 모델을 무작위로 선택하므로, 기존 31건(과거 누적 캐시)과 신규로 호출할 누락 9건을 그대로 이어 붙이면 "단일 모델의 40건 평가"로 볼 수 없다는 문제가 확인됨
+- 이를 해결하려면 (1) 실제 40건 평가를 기존 캐시와 완전히 분리된 새 캐시/실행으로 진행할 수 있어야 하고 (2) 응답이 실제로 어느 모델에서 왔는지 요청 모델과 별도로 기록해 검증할 수 있어야 함 — `--cache-path`와 `requested_model`/`resolved_model` 분리 기록은 이 두 요구사항을 코드 레벨에서 최소 범위로 지원하기 위한 사전 준비 작업
+- 실제 API 호출과 40건 전체 평가는 이번 작업 범위에서 제외 — 코드·테스트만 준비하고 다음 단계에서 별도로 실행하기로 함
+
 ### 변경 사항 (LLM 캐시 conflict 분류 세분화 및 실제 로컬 캐시 재현성 재검증)
 
 - `python-inference/experiments/llm_sentiment_client.py` — 중복 캐시 항목을 하나의 `conflicts`로 뭉치지 않고 `EXACT_DUPLICATE`(같은 input hash + 같은 의미 있는 응답 payload) / `RESPONSE_CONFLICT`(같은 input hash, 다른 payload — 실제 LLM 드리프트) / `KEY_COLLISION`(input hash 자체가 다름 — cache_key 해시 충돌)로 분류. payload 비교는 `overall_label` + `aspects`(name/sentiment/evidence, 순서 무관)만 canonical 비교하고 `confidence`/`short_reason`은 제외

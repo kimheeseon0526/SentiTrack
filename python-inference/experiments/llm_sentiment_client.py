@@ -66,6 +66,18 @@ class LLMConfig:
 
 @dataclass
 class LLMCallResult:
+    """`model` is the requested_model -- the model id sent in the API request.
+    `actual_model_if_available` is the resolved_model -- the model reported back in
+    the response's own `model` field, i.e. the model that actually produced this
+    response. For a request to a fixed model id these normally match. For a router
+    alias like `openrouter/free`, OpenRouter picks a different underlying free model
+    per request, so resolved_model can vary call-to-call even though requested_model
+    never changes -- responses from different resolved models must never be pooled
+    together and reported as one fixed model's performance.
+    `requested_model`/`resolved_model` are read-only aliases kept alongside the
+    original field names so existing call sites and persisted cache records keep
+    working unchanged."""
+
     result: LLMSentimentResult | None
     latency_ms: float
     token_usage: dict[str, Any] | None
@@ -80,6 +92,14 @@ class LLMCallResult:
     provider_host: str | None = None
     actual_model_if_available: str | None = None
     error: dict[str, str] | None = None
+
+    @property
+    def requested_model(self) -> str:
+        return self.model
+
+    @property
+    def resolved_model(self) -> str | None:
+        return self.actual_model_if_available
 
 
 def load_config_from_env(environ: dict[str, str] | None = None) -> LLMConfig:
@@ -146,6 +166,39 @@ def _input_hash_of(record: dict[str, Any]) -> str | None:
     parts = record.get("cache_key_parts")
     if isinstance(parts, dict):
         value = parts.get("review_text_hash")
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def _resolved_model_of(record: dict[str, Any]) -> str | None:
+    """Read the resolved_model (the model that actually produced a cached response)
+    from a persisted cache record. Falls back to the legacy `actual_model_if_available`
+    key for records written before `resolved_model` existed, so old cache entries keep
+    loading without error. Returns None -- never a guessed value -- when genuinely
+    unknown; callers must represent that explicitly (e.g. as "unknown") rather than
+    treating it as a particular model."""
+    value = record.get("resolved_model")
+    if isinstance(value, str):
+        return value
+    legacy = record.get("actual_model_if_available")
+    return legacy if isinstance(legacy, str) else None
+
+
+def _requested_model_of(record: dict[str, Any]) -> str | None:
+    """Read the requested_model from a persisted cache record, falling back to
+    `cache_key_parts.model` (always present -- it is part of the cache key) for
+    records written before the explicit `requested_model` field existed."""
+    value = record.get("requested_model")
+    if isinstance(value, str):
+        return value
+    return _cache_key_model_of(record)
+
+
+def _cache_key_model_of(record: dict[str, Any]) -> str | None:
+    parts = record.get("cache_key_parts")
+    if isinstance(parts, dict):
+        value = parts.get("model")
         if isinstance(value, str):
             return value
     return None
@@ -374,6 +427,12 @@ class OpenAICompatibleAdapter:
             )
             raise LLMSentimentError(error_type, message, raw_text=raw_text) from exc
 
+        # response.get("model") is the resolved_model: the model that actually produced
+        # this response. For a fixed model id this normally equals self.config.model
+        # (the requested_model). For a router alias such as "openrouter/free", OpenRouter
+        # routes each request to a different underlying free model, so resolved_model can
+        # differ from requested_model and can vary call-to-call -- see LLMCallResult
+        # docstring. Never assume resolved_model == requested_model for router aliases.
         return LLMCallResult(
             result=result,
             latency_ms=latency_ms,
@@ -518,9 +577,7 @@ def analyze_with_cache(
                 ),
                 provider_fallback_used=bool(cached.get("provider_fallback_used", False)),
                 provider_host=adapter.config.provider_host,
-                actual_model_if_available=cached.get("actual_model_if_available")
-                if isinstance(cached.get("actual_model_if_available"), str)
-                else None,
+                actual_model_if_available=_resolved_model_of(cached),
             )
 
     result = adapter.analyze(review_text)
@@ -540,6 +597,13 @@ def analyze_with_cache(
                 "provider_structured_output_used": result.provider_structured_output_used,
                 "provider_fallback_used": result.provider_fallback_used,
                 "actual_model_if_available": result.actual_model_if_available,
+                # requested_model/resolved_model duplicate cache_key_parts.model and
+                # actual_model_if_available under explicit names for easier diagnosis --
+                # see LLMCallResult docstring on why these two can differ for router
+                # aliases like "openrouter/free". Kept alongside the legacy fields rather
+                # than replacing them so existing readers/tests are unaffected.
+                "requested_model": adapter.config.model,
+                "resolved_model": result.actual_model_if_available,
             },
         )
     return result

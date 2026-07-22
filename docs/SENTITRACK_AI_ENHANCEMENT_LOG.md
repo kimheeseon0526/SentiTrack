@@ -1051,6 +1051,50 @@ LLM 캐시 write-once 수정 이후 cache-only 재검증
 - README/로그에 인용된 LLM 수치는 이제 `0.9677(30/31)`을 기준으로 삼는다.
 - 실제 API 키가 확보되면 남은 9건을 마무리하고, 이번에 관찰된 16건의 RESPONSE_CONFLICT 각각이 실제로 어떤 두 응답 사이의 차이였는지(예: aspect 이름/문구 차이 vs overall_label 자체가 다른 심각한 드리프트)는 별도로 분류해 볼 가치가 있다.
 
+### 작업명
+LLM 평가 캐시 격리(`--cache-path`) 및 requested/resolved model 분리 기록
+
+### 작업 목적
+- 남은 9건을 호출해 40건을 채우는 대신, 실제 40건 평가를 안전하고 재현 가능하게 실행할 준비 상태를 먼저 점검했다(별도 진단 보고 완료).
+- 그 진단에서 확인된 근본 문제 때문에, 실제 API 호출 전에 코드 최소 수정만 먼저 진행한다: (1) 기존 캐시를 전혀 건드리지 않는 새 평가를 실행할 수 있는 캐시 경로 분리, (2) 응답이 실제로 어느 모델에서 왔는지 요청 모델과 별도로 기록하는 기능.
+- 이번 단계에서는 OpenRouter API를 호출하지 않으며, 새로운 성능 평가를 실행하지 않는다.
+
+### 근본 문제
+- OpenRouter 공식 문서상 `openrouter/free`는 요청마다 사용 가능한 무료 모델 중 하나를 무작위로 라우팅한다. 즉 같은 `requested_model="openrouter/free"`로 보낸 두 요청이 서로 다른 실제 모델(`resolved_model`)의 응답일 수 있다.
+- 기존 31건(여러 세션에 걸쳐 누적된 캐시)과 누락 9건을 그대로 이어 붙여 호출하면, 그 결과는 "고정된 단일 모델의 40건 평가"가 아니라 여러 모델이 섞인 결과가 된다 — 성능 수치로 인용할 수 없다.
+- 코드에는 이미 응답의 실제 모델(`response.get("model")`)을 캐시에 기록하는 `actual_model_if_available` 필드가 있었지만, 이름이 "요청 모델과 다른 실제 모델"이라는 의미를 명확히 드러내지 않았고, 캐시 경로도 `evaluate_llm_sentiment.py` 안에 하드코딩돼 있어 기존 캐시를 건드리지 않는 새 실행을 만들 방법이 없었다.
+
+### 변경 파일
+- `python-inference/scripts/evaluate_llm_sentiment.py`
+- `python-inference/experiments/llm_sentiment_client.py`
+- `python-inference/tests/test_llm_sentiment_cache_isolation.py` (신규)
+
+### 구현 내용
+- `--cache-path` CLI 옵션 추가(기본값은 기존 `DEFAULT_CACHE_PATH`로 하위 호환 유지). `main_cli()`, dry-run 리포트(`build_dry_run_report`), 시작 요약 출력(`format_startup_summary`), 예상 호출 수 계산(`estimated_call_count`) 4곳 모두 지정된 경로를 쓰도록 일관되게 수정 — 이전에는 dry-run이 `--cache-path`와 무관하게 항상 기본 캐시 기준으로 예상치를 계산하던 부수적 버그도 함께 고쳤다.
+- `LLMCallResult.requested_model`/`.resolved_model` 읽기 전용 property 추가(기존 `model`/`actual_model_if_available` 필드는 이름·동작 그대로 유지 — 새 이름을 병행 노출하는 방식으로 기존 코드 구조와 충돌하지 않게 함).
+- 캐시 JSONL 레코드에 `requested_model`/`resolved_model` 키를 신규로 추가 기록. 읽을 때는 `_resolved_model_of()`/`_requested_model_of()` 헬퍼가 신규 키 → 레거시 키(`actual_model_if_available`/`cache_key_parts.model`) → `None` 순으로 폴백해, 이 필드가 전혀 없는 가장 오래된 캐시 레코드도 예외 없이 로딩된다.
+- 리포트 `prediction_payload`/`failure_payload`에 `requested_model`/`resolved_model` 키 추가, `calculate_overall_metrics()`에 `resolved_model_distribution`(모델별 건수, 미확인은 `"unknown"`) 집계 추가.
+- `LLMCallResult`와 `analyze()` 코드에 "router alias 응답은 고정 단일 모델 성능으로 합산·보고해서는 안 된다"는 주석을 명시.
+
+### 신규 테스트 (9개)
+`test_llm_sentiment_cache_isolation.py`: `--cache-path` CLI 반영 확인(dry-run), 지정 캐시 경로만 쓰기 발생·기본 캐시 파일 무변경, 신규 호출 시 requested/resolved model 저장, 새 세션 캐시 히트에서도 두 값 유지, 필드가 전혀 없는 레거시 레코드의 하위 호환, 레거시 필드명(`actual_model_if_available`)만 있는 레코드의 하위 호환, 같은 router alias가 호출마다 다른 resolved_model을 반환하는 경우의 구분 기록, resolved_model별 집계(`unknown` 포함), cache-only 실행에서 실제 호출 0건 확인.
+
+### 테스트 및 검증 결과
+- `python -m pytest python-inference/tests`: **169 passed, 18 warnings** (기존 160 + 신규 9, 회귀 0건).
+- 이번 작업 전체에서 **실제 OpenRouter API 호출은 0건**.
+- 기존 로컬 캐시(`llm_sentiment_cache.jsonl`) SHA256은 작업 전/후 동일: `cdd5e72de33e04516e20991142d4507ff2f711d9177f3b3c6ff69f6489cb1439` — 수정하지 않았다.
+- **`openrouter/free`로 얻은 결과는 고정된 단일 모델의 성능으로 표현할 수 없다** — 이번 코드 변경이 바로 이 문제를 다루기 위한 것이며, 아직 실제로 여러 모델이 섞였는지 여부를 관찰한 것은 아니다(기능만 준비, 관찰은 다음 단계).
+- **전체 40건을 고정된 단일 모델로 평가하는 실행은 아직 하지 않았다.**
+
+### 남은 한계
+- `python-inference/scripts/evaluate_llm_cache_only.py`는 여전히 기본 캐시 경로를 하드코딩한다 — 이번 수정 범위는 라이브 평가 스크립트(`evaluate_llm_sentiment.py`)로 한정했다.
+- `resolved_model`이 요청한 고정 모델과 다를 경우 자동으로 실행을 중단하거나 경고하는 로직은 아직 없다 — 리포트의 `resolved_model_distribution`을 사람이 확인해야 한다.
+- 재시도 backoff가 짧다는 기존 한계(0.1~0.2초)는 이번에도 그대로 남아있다.
+
+### 다음 작업
+- `openrouter/free`가 아닌 특정 `...:free` 모델 ID를 `requested_model`로 지정하고, 기존 캐시를 복사하지 않은 완전히 새로운 `--cache-path`로 40건 전체를 호출하는 실제 평가를 별도 단계에서 진행한다.
+- 응답의 `resolved_model`이 요청한 고정 모델과 실제로 일치하는지 리포트로 확인하고, 섞여 있다면 그 결과를 성능 수치로 인용하지 않는다.
+
 ## 기술 부채 (미해결 사항 누적)
 
 이 로그 전체에 날짜별로 흩어져 있는 미해결 항목을 한 곳에 모아 추적한다. 항목이 해결되면 해결 날짜와 커밋을 남기고 상태를 "해결됨"으로 바꾸되, 항목 자체는 삭제하지 않는다.
