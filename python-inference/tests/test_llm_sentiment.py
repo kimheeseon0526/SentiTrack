@@ -17,6 +17,7 @@ from experiments.llm_sentiment_client import (  # noqa: E402
     JsonlLLMCache,
     analyze_with_cache,
     build_cache_key,
+    cache_key_parts,
     load_config_from_env,
 )
 from experiments.llm_sentiment_schema import extract_json_payload, validate_llm_result  # noqa: E402
@@ -76,6 +77,28 @@ def provider_payload(content: str, total_tokens: int = 12) -> dict:
         "choices": [{"message": {"content": content}}],
         "usage": {"total_tokens": total_tokens},
     }
+
+
+def write_raw_cache_line(
+    path,
+    cache_key: str,
+    raw_text: str,
+    review_text: str,
+    model: str = "model-a",
+) -> None:
+    """Append a JSONL line directly, bypassing `.set()`, to simulate a pre-existing cache
+    file entry (including drifted/collided entries that write-once would never itself
+    produce going forward)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "cache_key": cache_key,
+        "cache_key_parts": cache_key_parts(review_text, model),
+        "raw_text": raw_text,
+        "latency_ms": 1.0,
+        "token_usage": None,
+    }
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def test_normal_json_parsing_and_validation():
@@ -262,6 +285,253 @@ def test_prompt_version_change_causes_cache_miss(tmp_path, monkeypatch):
     analyze_with_cache(text, adapter, cache=cache, use_cache=True)
 
     assert calls["count"] == 1
+
+
+def test_cache_set_does_not_overwrite_existing_entry_by_default(tmp_path):
+    cache = JsonlLLMCache(tmp_path / "cache.jsonl")
+    key = build_cache_key("향이 좋아요.", "model-a")
+    first_value = {"raw_text": result_json(overall_label="POSITIVE"), "latency_ms": 1.0, "token_usage": None}
+    second_value = {"raw_text": result_json(overall_label="NEGATIVE"), "latency_ms": 2.0, "token_usage": None}
+
+    written_first = cache.set(key, first_value)
+    written_second = cache.set(key, second_value)
+
+    assert written_first is True
+    assert written_second is False
+    assert cache.get(key)["raw_text"] == first_value["raw_text"]
+
+
+def test_cache_set_overwrites_when_explicitly_allowed(tmp_path):
+    cache = JsonlLLMCache(tmp_path / "cache.jsonl")
+    key = build_cache_key("향이 좋아요.", "model-a")
+    first_value = {"raw_text": result_json(overall_label="POSITIVE"), "latency_ms": 1.0, "token_usage": None}
+    second_value = {"raw_text": result_json(overall_label="NEGATIVE"), "latency_ms": 2.0, "token_usage": None}
+
+    cache.set(key, first_value)
+    written_second = cache.set(key, second_value, allow_overwrite=True)
+
+    assert written_second is True
+    assert cache.get(key)["raw_text"] == second_value["raw_text"]
+
+
+def test_explicit_overwrite_is_visible_as_response_conflict_on_reload(tmp_path):
+    """`allow_overwrite=True` is a low-level escape hatch (not wired to any CLI flag) for
+    deliberately correcting a cache entry. Even when used, a fresh reload must still
+    resolve deterministically (first entry wins) and must surface the discrepancy via
+    `.conflicts` rather than silently accepting whichever value happened to load last.
+    No review text or raw LLM response content should appear in the conflict entry."""
+    path = tmp_path / "cache.jsonl"
+    key = build_cache_key("향이 좋아요.", "model-a")
+    first_value = {"raw_text": result_json(overall_label="POSITIVE"), "latency_ms": 1.0, "token_usage": None}
+    second_value = {"raw_text": result_json(overall_label="NEGATIVE"), "latency_ms": 2.0, "token_usage": None}
+
+    writer = JsonlLLMCache(path)
+    writer.set(key, first_value)
+    writer.set(key, second_value, allow_overwrite=True)
+
+    reader = JsonlLLMCache(path)
+    assert reader.get(key)["raw_text"] == first_value["raw_text"]
+    assert reader.duplicates == []
+    assert reader.key_collisions == []
+    conflicts = reader.conflicts
+    assert len(conflicts) == 1
+    entry = conflicts[0]
+    assert entry["cache_key"] == key
+    assert entry["conflict_type"] == "RESPONSE_CONFLICT"
+    assert "raw_text" not in entry
+    assert "first_raw_text" not in entry
+    assert "later_raw_text" not in entry
+    assert result_json(overall_label="POSITIVE") not in json.dumps(entry, ensure_ascii=False)
+    assert result_json(overall_label="NEGATIVE") not in json.dumps(entry, ensure_ascii=False)
+
+
+def test_same_key_same_text_same_payload_is_exact_duplicate(tmp_path):
+    path = tmp_path / "cache.jsonl"
+    text = "향이 좋아요."
+    key = build_cache_key(text, "model-a")
+    same_raw_text = result_json(overall_label="POSITIVE")
+
+    write_raw_cache_line(path, key, same_raw_text, text)
+    write_raw_cache_line(path, key, same_raw_text, text)
+
+    cache = JsonlLLMCache(path)
+    assert len(cache.duplicates) == 1
+    assert cache.response_conflicts == []
+    assert cache.key_collisions == []
+    assert cache.conflicts == []
+    assert cache.get(key)["raw_text"] == same_raw_text
+
+
+def test_same_key_same_text_different_payload_is_response_conflict(tmp_path):
+    path = tmp_path / "cache.jsonl"
+    text = "향이 좋아요."
+    key = build_cache_key(text, "model-a")
+
+    write_raw_cache_line(path, key, result_json(overall_label="POSITIVE"), text)
+    write_raw_cache_line(path, key, result_json(overall_label="NEGATIVE"), text)
+
+    cache = JsonlLLMCache(path)
+    assert cache.duplicates == []
+    assert len(cache.response_conflicts) == 1
+    assert cache.key_collisions == []
+    assert cache.response_conflicts[0]["cache_key"] == key
+    # first value is retained despite the later, disagreeing response
+    assert cache.get(key)["raw_text"] == result_json(overall_label="POSITIVE")
+
+
+def test_same_key_different_text_is_key_collision(tmp_path):
+    path = tmp_path / "cache.jsonl"
+    key = build_cache_key("향이 좋아요.", "model-a")  # shared key, simulating a hash collision
+
+    write_raw_cache_line(path, key, result_json(overall_label="POSITIVE"), "향이 좋아요.")
+    write_raw_cache_line(path, key, result_json(overall_label="NEGATIVE"), "완전히 다른 문장입니다.")
+
+    cache = JsonlLLMCache(path)
+    assert cache.duplicates == []
+    assert cache.response_conflicts == []
+    assert len(cache.key_collisions) == 1
+    collision = cache.key_collisions[0]
+    assert collision["cache_key"] == key
+    assert collision["input_hash_first"] != collision["input_hash_later"]
+    assert "raw_text" not in collision
+    assert "향" not in json.dumps(collision, ensure_ascii=False)
+    # first value is retained despite the later, unrelated response
+    assert cache.get(key)["raw_text"] == result_json(overall_label="POSITIVE")
+
+
+def test_conflicts_property_combines_response_conflicts_and_key_collisions_only(tmp_path):
+    path = tmp_path / "cache.jsonl"
+    dup_key = build_cache_key("dup", "model-a")
+    conflict_key = build_cache_key("conflict", "model-a")
+    collision_key = build_cache_key("collision", "model-a")
+
+    write_raw_cache_line(path, dup_key, result_json(overall_label="POSITIVE"), "dup")
+    write_raw_cache_line(path, dup_key, result_json(overall_label="POSITIVE"), "dup")
+
+    write_raw_cache_line(path, conflict_key, result_json(overall_label="POSITIVE"), "conflict")
+    write_raw_cache_line(path, conflict_key, result_json(overall_label="NEGATIVE"), "conflict")
+
+    write_raw_cache_line(path, collision_key, result_json(overall_label="POSITIVE"), "collision-a")
+    write_raw_cache_line(path, collision_key, result_json(overall_label="NEGATIVE"), "collision-b")
+
+    cache = JsonlLLMCache(path)
+    assert len(cache.duplicates) == 1
+    assert len(cache.response_conflicts) == 1
+    assert len(cache.key_collisions) == 1
+    conflicts = cache.conflicts
+    assert len(conflicts) == 2
+    conflict_types = {entry["conflict_type"] for entry in conflicts}
+    assert conflict_types == {"RESPONSE_CONFLICT", "KEY_COLLISION"}
+
+
+def test_duplicates_and_conflicts_never_trigger_a_live_call(tmp_path):
+    """Even when the cache file already contains duplicate/conflicting entries, a
+    cache-only evaluation run (blocked opener, same shape as evaluate_llm_cache_only.py)
+    must make zero real network calls -- duplicates/conflicts are a read-time
+    classification concern only, never a reason to fall through to a live request."""
+    path = tmp_path / "cache.jsonl"
+    duplicate_text = "향이 좋아요."
+    conflict_text = "향은 너무 좋지만 지속력이 별로예요."
+
+    duplicate_key = build_cache_key(duplicate_text, "model-a")
+    write_raw_cache_line(path, duplicate_key, result_json(overall_label="POSITIVE"), duplicate_text)
+    write_raw_cache_line(path, duplicate_key, result_json(overall_label="POSITIVE"), duplicate_text)
+
+    conflict_key = build_cache_key(conflict_text, "model-a")
+    write_raw_cache_line(path, conflict_key, result_json(overall_label="MIXED"), conflict_text)
+    write_raw_cache_line(path, conflict_key, result_json(overall_label="POSITIVE"), conflict_text)
+
+    cache = JsonlLLMCache(path)
+
+    def blocked_opener(*_args, **_kwargs):
+        raise LLMSentimentError("NO_LIVE_CALL_SKIPPED", "live call should never happen in this test")
+
+    adapter = OpenAICompatibleAdapter(
+        LLMConfig("secret-key", "model-a", "https://llm.example/v1"),
+        opener=blocked_opener,
+    )
+    records = [
+        make_record("r1", duplicate_text, "POSITIVE"),
+        make_record("r2", conflict_text, "MIXED"),
+    ]
+
+    report = evaluator.evaluate_llm_records(
+        records,
+        adapter,
+        path,
+        cache=cache,
+        use_cache=True,
+    )
+
+    assert report["metadata"]["actual_api_call_count"] == 0
+    assert all(row["error"] is None for row in report["predictions"])
+    assert [row["cache_hit"] for row in report["predictions"]] == [True, True]
+    assert report["predictions"][0]["predicted_overall_label"] == "POSITIVE"
+    assert report["predictions"][1]["predicted_overall_label"] == "MIXED"
+
+    cache_usage = report["metadata"]["cache_usage"]
+    assert cache_usage["cache_duplicate_count"] == 1
+    assert cache_usage["cache_response_conflict_count"] == 1
+    assert cache_usage["cache_key_collision_count"] == 0
+    assert cache_usage["cache_conflict_count"] == 1
+    assert len(cache_usage["cache_conflicts"]) == 1
+    assert cache_usage["cache_conflicts"][0]["conflict_type"] == "RESPONSE_CONFLICT"
+
+
+def test_second_session_reuses_cached_value_without_recalling_provider(tmp_path):
+    """Simulates two separate sessions (fresh JsonlLLMCache instance each, same file) --
+    the second session must reuse the first session's stored answer, never re-call the
+    provider, even though a fresh provider call would return a different response."""
+    path = tmp_path / "cache.jsonl"
+    text = "향이 좋아요."
+
+    session_one_cache = JsonlLLMCache(path)
+    session_one_adapter = OpenAICompatibleAdapter(
+        LLMConfig("secret-key", "model-a", "https://llm.example/v1"),
+        opener=lambda *_a, **_k: FakeResponse(provider_payload(result_json(overall_label="POSITIVE"))),
+    )
+    first_result = analyze_with_cache(text, session_one_adapter, cache=session_one_cache, use_cache=True)
+
+    session_two_cache = JsonlLLMCache(path)
+    session_two_adapter = OpenAICompatibleAdapter(
+        LLMConfig("secret-key", "model-a", "https://llm.example/v1"),
+        opener=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("provider must not be called on cache hit")),
+    )
+    second_result = analyze_with_cache(text, session_two_adapter, cache=session_two_cache, use_cache=True)
+
+    assert first_result.result.overall_label == "POSITIVE"
+    assert second_result.cache_hit is True
+    assert second_result.result.overall_label == "POSITIVE"
+
+
+def test_refresh_cache_does_not_overwrite_existing_ground_truth(tmp_path):
+    """Reproduces the documented reproducibility bug: a later --refresh-cache run for a
+    text that overlaps with an earlier cached evaluation must not silently replace the
+    stored answer, even though the fresh provider call itself succeeds and returns a
+    different result for this run's own report."""
+    path = tmp_path / "cache.jsonl"
+    text = "향은 너무 좋지만 지속력이 별로예요."
+
+    first_cache = JsonlLLMCache(path)
+    first_adapter = OpenAICompatibleAdapter(
+        LLMConfig("secret-key", "model-a", "https://llm.example/v1"),
+        opener=lambda *_a, **_k: FakeResponse(provider_payload(result_json(overall_label="MIXED"))),
+    )
+    analyze_with_cache(text, first_adapter, cache=first_cache, use_cache=True)
+
+    refresh_cache_instance = JsonlLLMCache(path)
+    refresh_adapter = OpenAICompatibleAdapter(
+        LLMConfig("secret-key", "model-a", "https://llm.example/v1"),
+        opener=lambda *_a, **_k: FakeResponse(provider_payload(result_json(overall_label="POSITIVE"))),
+    )
+    refresh_result = analyze_with_cache(text, refresh_adapter, cache=refresh_cache_instance, refresh_cache=True)
+
+    assert refresh_result.result.overall_label == "POSITIVE"
+
+    reread_cache = JsonlLLMCache(path)
+    key = build_cache_key(text, "model-a")
+    assert reread_cache.get(key)["raw_text"] == result_json(overall_label="MIXED")
+    assert reread_cache.conflicts == []
 
 
 def test_dry_run_does_not_call_provider(monkeypatch):

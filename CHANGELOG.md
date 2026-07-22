@@ -2,7 +2,36 @@
 
 ---
 
+## 2026-07-22
+
+### 변경 사항 (LLM 캐시 conflict 분류 세분화 및 실제 로컬 캐시 재현성 재검증)
+
+- `python-inference/experiments/llm_sentiment_client.py` — 중복 캐시 항목을 하나의 `conflicts`로 뭉치지 않고 `EXACT_DUPLICATE`(같은 input hash + 같은 의미 있는 응답 payload) / `RESPONSE_CONFLICT`(같은 input hash, 다른 payload — 실제 LLM 드리프트) / `KEY_COLLISION`(input hash 자체가 다름 — cache_key 해시 충돌)로 분류. payload 비교는 `overall_label` + `aspects`(name/sentiment/evidence, 순서 무관)만 canonical 비교하고 `confidence`/`short_reason`은 제외
+- `python-inference/scripts/evaluate_llm_sentiment.py` — `cache_usage_payload()`에 `cache_duplicate_count`/`cache_response_conflict_count`/`cache_key_collision_count` 분리 필드 추가(`cache_conflict_count`/`cache_conflicts`는 response_conflict+key_collision만 포함, exact_duplicate는 집계에서 제외). `cache_conflicts` 각 항목은 `cache_key`/`input_hash`/`line_number`/`conflict_type`만 포함 — 리뷰 원문·LLM 응답 텍스트는 넣지 않음
+- `python-inference/tests/test_llm_sentiment.py` — 세 분류 각각의 판정, `conflicts` 프로퍼티가 exact_duplicate를 제외하는지, 중복/충돌이 있어도 실제 네트워크 호출이 0건인지 검증하는 테스트 5개 추가 (155 → 160 passed)
+- **실제 로컬 캐시(`llm_sentiment_cache.jsonl`, 84KB, 이번 작업에서 수정하지 않음)로 검증**: `evaluate_llm_cache_only.py`를 캐시 파일을 건드리지 않고 동일 설정으로 2회 실행 → 리포트가 바이트 단위로 완전히 동일(SHA256 일치), `actual_api_call_count`는 2회 모두 0. 실제 conflict 집계는 `cache_duplicate_count=8`, `cache_response_conflict_count=16`, `cache_key_collision_count=0`
+
+### 이유
+
+- 이전 커밋에서 구현한 `.conflicts`는 같은 cache_key에서 `raw_text`가 다르면 전부 "충돌"로만 집계해, 실제로는 문제 없는 완전 동일 재기록(중복)과 진짜 LLM 응답 드리프트(response conflict), 그리고 이론상의 cache_key 해시 충돌(key collision)을 구분하지 못했다. 세 원인은 대응 방법이 다르므로 분리 집계가 필요했음
+- 성능 수치가 아니라 진단 정확도를 높이는 작업이며, 실제 로컬 캐시로 검증한 결과 재현성(2회 실행 결과 완전 동일, 외부 호출 0건)은 확인됐지만 그 과정에서 **부수적으로** 31/40건 cache-only 서브셋의 overall 정확도가 `0.9355(29/31, 수정 전 last-write-wins 기준)`에서 `0.9677(30/31, 수정 후 first-write-wins 기준)`으로 달라지는 것을 확인함
+- **이 수치 변화는 모델·프롬프트·평가 데이터가 개선된 것이 아니다.** KoELECTRA/`/predict`는 건드리지 않았고 LLM 쪽도 모델·프롬프트(`sentiment-aspect-v1`)·데이터셋이 동일하다 — 모델·프롬프트·평가 데이터셋은 변경되지 않았으며, 중복 캐시 중 어느 과거 예측 응답을 평가 입력으로 사용하는지가 변경된 결과다. 여전히 40건 중 31건 기준의 부분 평가이며 전체 40건 실시간 평가가 아니고, 외부 API 호출은 0건이다
+- `README.md`, `docs/SENTITRACK_AI_ENHANCEMENT_LOG.md`를 이 수치 변경 원인과 함께 갱신 (기존 `0.9355` 기록은 삭제하지 않고 "수정 전 last-write-wins 기준 과거 결과"로 남김)
+
 ## 2026-07-21
+
+### 변경 사항 (LLM 평가 캐시 재현성 버그 수정)
+
+- `python-inference/experiments/llm_sentiment_client.py` — `JsonlLLMCache.set()`에 `allow_overwrite: bool = False` 파라미터 추가(기존 키가 있으면 기본적으로 쓰기를 건너뛰고 `False` 반환, write-once 정책). `_ensure_loaded()`를 파일 내 중복 `cache_key`에 대해 마지막 줄이 아니라 **첫 번째 줄이 항상 이기도록** 변경하고, 서로 다른 `raw_text`를 가진 중복 항목을 `conflicts` 프로퍼티로 노출
+- `python-inference/experiments/llm_sentiment_client.py` — `analyze_with_cache()`에 `refresh_cache=True`의 의미를 "이번 실행은 캐시를 읽지 않고 항상 라이브 호출한다"로 한정하고, 그 결과를 캐시에 쓸 때도 기존 키를 덮어쓰지 않도록 함(이전에는 무조건 덮어썼음)
+- `python-inference/scripts/evaluate_llm_sentiment.py` — `cache_usage_payload()`가 리포트 metadata에 `cache_conflict_count`/`cache_conflicts`를 포함하도록 변경 — 캐시 파일에 과거 드리프트로 생긴 중복 항목이 있으면 이후 모든 리포트(`evaluate_llm_cache_only.py` 포함)에 자동으로 노출됨
+- `python-inference/tests/test_llm_sentiment.py` — write-once 기본 동작, 명시적 `allow_overwrite`, 충돌 감지, 세션 간 재사용, `refresh_cache`가 기존 캐시를 덮어쓰지 않음을 검증하는 테스트 5개 추가 (150 → 155 passed)
+
+### 이유
+
+- `docs/SENTITRACK_AI_ENHANCEMENT_LOG.md`의 "기술 부채 1. LLM 캐시 재현성" 항목에서 확인된 근본 원인: `JsonlLLMCache`가 같은 `cache_key`를 나중에 쓴 값이 이전 값을 덮어쓰는 last-write-wins 구조라, 비결정적인 LLM 응답이 세션 간 재호출되면 과거 캐시가 조용히 교체되어 재현성이 깨졌음(대표 12건의 aspect F1이 0.9032→0.4667로 하락한 사례)
+- 목표는 특정 성능 수치를 올리는 것이 아니라 "동일한 입력·평가 설정·캐시를 사용하면 항상 동일한 예측·평가 결과가 나오도록" 만드는 것이므로, 캐시를 write-once(최초 성공 응답을 영구 보존)로 바꾸고, 그래도 발생할 수 있는 이력상의 충돌은 숨기지 않고 리포트에 명시적으로 노출하는 방향으로 수정
+- `--refresh-cache`는 "라이브 호출을 강제한다"는 원래 목적은 유지하되, 그 결과가 다른 평가(예: 12건 대표셋)가 참조하는 기존 캐시 항목을 의도치 않게 덮어쓰지 않도록 쓰기 동작만 분리
 
 ### 변경 사항 (README·AI 고도화 로그 문서 정리)
 

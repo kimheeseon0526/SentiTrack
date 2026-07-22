@@ -137,39 +137,185 @@ def cache_key_parts(
     }
 
 
+EXACT_DUPLICATE = "EXACT_DUPLICATE"
+RESPONSE_CONFLICT = "RESPONSE_CONFLICT"
+KEY_COLLISION = "KEY_COLLISION"
+
+
+def _input_hash_of(record: dict[str, Any]) -> str | None:
+    parts = record.get("cache_key_parts")
+    if isinstance(parts, dict):
+        value = parts.get("review_text_hash")
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def _canonical_meaningful_payload(raw_text: Any) -> Any:
+    """The part of an LLM response that actually matters for reproducibility: the
+    overall label plus the (name, sentiment, evidence) aspect triples, order
+    -independent. `confidence` and `short_reason` are deliberately excluded -- a
+    self-reported score and freeform wording can differ between two calls of the
+    same non-deterministic model without the underlying sentiment result actually
+    disagreeing, and comparing on them would manufacture false conflicts out of
+    surface noise. Falls back to the raw text itself when it isn't parseable JSON,
+    since no semantic comparison is possible in that case."""
+    if not isinstance(raw_text, str):
+        return raw_text
+    try:
+        payload = extract_json_payload(raw_text)
+    except ValueError:
+        return raw_text
+    aspects = payload.get("aspects")
+    normalized_aspects: list[tuple[Any, Any, Any]] = []
+    if isinstance(aspects, list):
+        for aspect in aspects:
+            if isinstance(aspect, dict):
+                normalized_aspects.append((aspect.get("name"), aspect.get("sentiment"), aspect.get("evidence")))
+    normalized_aspects.sort(key=lambda item: tuple(str(part) for part in item))
+    return {"overall_label": payload.get("overall_label"), "aspects": normalized_aspects}
+
+
+def _classify_duplicate(existing: dict[str, Any], record: dict[str, Any]) -> str:
+    existing_hash = _input_hash_of(existing)
+    later_hash = _input_hash_of(record)
+    if existing_hash is not None and later_hash is not None and existing_hash != later_hash:
+        return KEY_COLLISION
+    existing_payload = _canonical_meaningful_payload(existing.get("raw_text"))
+    later_payload = _canonical_meaningful_payload(record.get("raw_text"))
+    if existing_payload == later_payload:
+        return EXACT_DUPLICATE
+    return RESPONSE_CONFLICT
+
+
 class JsonlLLMCache:
+    """Append-only JSONL cache keyed by (review text hash, model, prompt/schema version).
+
+    Resolution policy is first-write-wins, both on disk and in memory: the first
+    stored response for a given cache_key is treated as the permanent ground truth.
+    Non-deterministic LLM responses re-requested under the same key must never
+    silently replace an earlier result -- that was the root cause of the
+    reproducibility bug where re-evaluating the same cache produced different
+    metrics across sessions. `set()` therefore only writes when the key is new,
+    unless `allow_overwrite=True` is passed explicitly.
+
+    When the same cache_key appears more than once in the JSONL file (e.g. from a
+    cache file written before this write-once policy existed), the duplicate lines
+    are classified rather than blindly resolved:
+      - EXACT_DUPLICATE: same key, same input, same meaningful response payload --
+        harmless, not a real conflict.
+      - RESPONSE_CONFLICT: same key, same input, different meaningful response
+        payload -- genuine LLM non-determinism/drift.
+      - KEY_COLLISION: same key, but the stored input hash differs -- the cache_key
+        does not uniquely identify the input it was supposed to.
+    """
+
     def __init__(self, path: Path = DEFAULT_CACHE_PATH):
         self.path = path
         self._items: dict[str, dict[str, Any]] | None = None
+        self._duplicates: list[dict[str, Any]] = []
+        self._response_conflicts: list[dict[str, Any]] = []
+        self._key_collisions: list[dict[str, Any]] = []
 
     def get(self, key: str) -> dict[str, Any] | None:
         self._ensure_loaded()
         assert self._items is not None
         return self._items.get(key)
 
-    def set(self, key: str, value: dict[str, Any]) -> None:
+    def set(self, key: str, value: dict[str, Any], *, allow_overwrite: bool = False) -> bool:
+        """Write a cache entry. Returns False (no-op) if the key already exists and
+        allow_overwrite is False -- the existing stored value is left untouched."""
         self._ensure_loaded()
         assert self._items is not None
+        if key in self._items and not allow_overwrite:
+            return False
         self._items[key] = value
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as file:
             file.write(json.dumps({"cache_key": key, **value}, ensure_ascii=False) + "\n")
+        return True
+
+    @property
+    def duplicates(self) -> list[dict[str, Any]]:
+        """Repeated writes for a key that agree on both input and meaningful result --
+        harmless, counted separately from real conflicts."""
+        self._ensure_loaded()
+        return list(self._duplicates)
+
+    @property
+    def response_conflicts(self) -> list[dict[str, Any]]:
+        """Same key, same input, disagreeing meaningful response -- real LLM drift."""
+        self._ensure_loaded()
+        return list(self._response_conflicts)
+
+    @property
+    def key_collisions(self) -> list[dict[str, Any]]:
+        """Same key, but a different underlying input -- the cache_key hash failed to
+        uniquely identify its input."""
+        self._ensure_loaded()
+        return list(self._key_collisions)
+
+    @property
+    def conflicts(self) -> list[dict[str, Any]]:
+        """response_conflicts + key_collisions -- the entries that represent a real
+        disagreement, as opposed to harmless exact duplicates. Each entry carries only
+        cache_key / input hash / conflict_type / line_number: no review text or LLM
+        response content, to avoid leaking review content into diagnostic reports."""
+        self._ensure_loaded()
+        tagged = [{**entry, "conflict_type": RESPONSE_CONFLICT} for entry in self._response_conflicts]
+        tagged += [{**entry, "conflict_type": KEY_COLLISION} for entry in self._key_collisions]
+        return tagged
 
     def _ensure_loaded(self) -> None:
         if self._items is not None:
             return
         self._items = {}
+        self._duplicates = []
+        self._response_conflicts = []
+        self._key_collisions = []
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as file:
-            for line in file:
+            for line_number, line in enumerate(file, start=1):
                 stripped = line.strip()
                 if not stripped:
                     continue
                 record = json.loads(stripped)
                 key = record.get("cache_key")
-                if isinstance(key, str):
+                if not isinstance(key, str):
+                    continue
+                existing = self._items.get(key)
+                if existing is None:
                     self._items[key] = record
+                    continue
+
+                classification = _classify_duplicate(existing, record)
+                if classification == KEY_COLLISION:
+                    self._key_collisions.append(
+                        {
+                            "cache_key": key,
+                            "input_hash_first": _input_hash_of(existing),
+                            "input_hash_later": _input_hash_of(record),
+                            "line_number": line_number,
+                        }
+                    )
+                elif classification == RESPONSE_CONFLICT:
+                    self._response_conflicts.append(
+                        {
+                            "cache_key": key,
+                            "input_hash": _input_hash_of(existing),
+                            "line_number": line_number,
+                        }
+                    )
+                else:
+                    self._duplicates.append(
+                        {
+                            "cache_key": key,
+                            "input_hash": _input_hash_of(existing),
+                            "line_number": line_number,
+                        }
+                    )
+                # first occurrence always wins, regardless of classification.
 
 
 class OpenAICompatibleAdapter:
@@ -328,6 +474,11 @@ def analyze_with_cache(
     prompt_version: str | None = None,
     schema_version: str | None = None,
 ) -> LLMCallResult:
+    """`refresh_cache` forces a live call for this run (bypasses reading the cache) but
+    never overwrites an existing cache entry: a key already written by an earlier
+    successful call stays the permanent ground truth. This is what keeps repeated
+    evaluations of the same cache deterministic even when a live provider response
+    is itself non-deterministic across calls."""
     if use_cache and refresh_cache:
         raise ValueError("--use-cache and --refresh-cache cannot be used together")
     explicit_version_selection = (

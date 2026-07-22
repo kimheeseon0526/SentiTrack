@@ -1344,11 +1344,22 @@ def cache_usage_payload(
     refresh_cache: bool,
     cache: JsonlLLMCache | None,
 ) -> dict[str, Any]:
-    return {
+    duplicates = cache.duplicates if cache is not None else []
+    response_conflicts = cache.response_conflicts if cache is not None else []
+    key_collisions = cache.key_collisions if cache is not None else []
+    conflicts = cache.conflicts if cache is not None else []
+    payload = {
         "use_cache": use_cache,
         "refresh_cache": refresh_cache,
         "cache_path": str(cache.path if cache else DEFAULT_CACHE_PATH),
+        "cache_duplicate_count": len(duplicates),
+        "cache_response_conflict_count": len(response_conflicts),
+        "cache_key_collision_count": len(key_collisions),
+        "cache_conflict_count": len(conflicts),
     }
+    if conflicts:
+        payload["cache_conflicts"] = conflicts
+    return payload
 
 
 def format_startup_summary(
